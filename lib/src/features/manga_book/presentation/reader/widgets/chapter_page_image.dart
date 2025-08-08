@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -46,6 +47,20 @@ class ChapterPageImage extends ConsumerWidget {
             fit: fit ?? BoxFit.contain,
             height: size?.height,
             width: size?.width,
+            errorBuilder: (context, error, stackTrace) {
+              if (kDebugMode) {
+                print('Error loading local image ${file.path}: $error');
+              }
+              // Fallback to server image on error
+              return ServerImage(
+                imageUrl: imageUrl, 
+                fit: fit,
+                showReloadButton: showReloadButton,
+                progressIndicatorBuilder: progressIndicatorBuilder,
+                wrapper: wrapper,
+                size: size,
+              );
+            },
           );
           return wrapper?.call(image) ?? image;
         }

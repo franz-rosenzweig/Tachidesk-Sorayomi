@@ -10,12 +10,29 @@ import 'package:path_provider/path_provider.dart';
 import '../../../../utils/extensions/cache_manager_extensions.dart';
 import '../../domain/local_downloads/local_downloads_model.dart';
 import '../manga_book/manga_book_repository.dart';
+import 'local_downloads_settings_repository.dart';
 
 class LocalDownloadsRepository {
   static const downloadsFolderName = 'sorayomi_downloads';
   static const manifestFileName = 'manifest.json';
 
+  final Ref _ref;
+  
+  LocalDownloadsRepository(this._ref);
+
   Future<Directory> _baseDir() async {
+    // Check if user has set a custom downloads path
+    final customPath = await _ref.read(localDownloadsSettingsRepositoryProvider).getLocalDownloadsPath();
+    
+    if (customPath != null && customPath.isNotEmpty) {
+      final dir = Directory(p.join(customPath, downloadsFolderName));
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      return dir;
+    }
+    
+    // Default path: Documents directory
     final docs = await getApplicationDocumentsDirectory();
     final dir = Directory(p.join(docs.path, downloadsFolderName));
     if (!await dir.exists()) {
@@ -93,6 +110,9 @@ class LocalDownloadsRepository {
       try {
         await cached.copy(dest.path);
         saved.add(dest);
+        if (kDebugMode) {
+          print('Successfully saved page $i to ${dest.path}');
+        }
       } catch (e) {
         if (kDebugMode) {
           print('Failed to copy page $i for chapter $chapterId: $e');
@@ -151,17 +171,35 @@ class LocalDownloadsRepository {
 
   Future<File?> getLocalPageFile(int mangaId, int chapterId, int index) async {
     final manifest = await getManifest(mangaId, chapterId);
-    if (manifest == null) return null;
-    if (index < 0 || index >= manifest.pageFiles.length) return null;
+    if (manifest == null) {
+      if (kDebugMode) {
+        print('No manifest found for manga $mangaId, chapter $chapterId');
+      }
+      return null;
+    }
+    if (index < 0 || index >= manifest.pageFiles.length) {
+      if (kDebugMode) {
+        print('Index $index out of range for chapter $chapterId (0-${manifest.pageFiles.length - 1})');
+      }
+      return null;
+    }
     final dir = await _chapterDir(mangaId, chapterId);
     final file = File(p.join(dir.path, manifest.pageFiles[index]));
-    if (await file.exists()) return file;
+    if (await file.exists()) {
+      if (kDebugMode) {
+        print('Found local file: ${file.path}');
+      }
+      return file;
+    }
+    if (kDebugMode) {
+      print('Local file does not exist: ${file.path}');
+    }
     return null;
   }
 }
 
 final localDownloadsRepositoryProvider = Provider<LocalDownloadsRepository>(
-  (ref) => LocalDownloadsRepository(),
+  (ref) => LocalDownloadsRepository(ref),
 );
 
 final localDownloadsListProvider = FutureProvider.autoDispose((ref) async {

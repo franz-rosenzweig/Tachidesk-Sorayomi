@@ -5,6 +5,7 @@ import '../../features/settings/controller/server_controller.dart';
 import '../../features/settings/domain/settings/settings.dart';
 import '../../utils/extensions/custom_extensions.dart';
 import '../../utils/misc/app_utils.dart';
+import '../../utils/misc/file_picker_utils.dart';
 import '../../utils/misc/toast/toast.dart';
 import 'domain/settings_prop_type.dart';
 import 'settings_prop_pop_up.dart';
@@ -49,6 +50,15 @@ class SettingsPropTile extends StatelessWidget {
         leading: leading,
         titleWidget: titleWidget,
         switchProp: type as SwitchProp,
+      );
+    }
+    if (type is DirectoryPickerProp) {
+      return DirectoryPickerSettingsPropTile(
+        subtitleString: subtitleString,
+        title: title,
+        leading: leading,
+        titleWidget: titleWidget,
+        directoryPickerProp: type as DirectoryPickerProp,
       );
     }
     return Tooltip(
@@ -123,6 +133,59 @@ class SwitchSettingsPropTile extends ConsumerWidget {
             );
             if (result != null && result is SettingsDto) {
               ref.read(settingsProvider.notifier).updateState(result);
+            }
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class DirectoryPickerSettingsPropTile extends ConsumerWidget {
+  const DirectoryPickerSettingsPropTile({
+    super.key,
+    required this.subtitleString,
+    required this.title,
+    required this.leading,
+    required this.titleWidget,
+    required this.directoryPickerProp,
+  });
+
+  final String? subtitleString;
+  final String? title;
+  final Widget? leading;
+  final Widget? titleWidget;
+  final DirectoryPickerProp directoryPickerProp;
+
+  @override
+  Widget build(context, ref) {
+    return Tooltip(
+      message: subtitleString ?? title,
+      child: ListTile(
+        leading: leading,
+        trailing: const Icon(Icons.folder_open),
+        title: titleWidget ?? Text(title!),
+        subtitle: subtitleString.isNotBlank
+            ? Text(
+                subtitleString ?? "",
+                overflow: TextOverflow.ellipsis,
+              )
+            : null,
+        onTap: AppUtils.returnIf(
+          directoryPickerProp.onChanged != null,
+          () async {
+            try {
+              final selectedPath = await FilePickerUtils.pickDirectory(context: context);
+              if (selectedPath != null) {
+                await AppUtils.guard(
+                  () => directoryPickerProp.onChanged!(selectedPath),
+                  ref.read(toastProvider),
+                );
+                // For local settings, we don't update the server state
+                // The result should be handled by the local repository
+              }
+            } catch (e) {
+              // Error is already handled by AppUtils.guard above
             }
           },
         ),

@@ -6,6 +6,7 @@ import '../../../../widgets/emoticons.dart';
 import '../../../../widgets/input_popup/domain/settings_prop_type.dart';
 import '../../../../widgets/input_popup/settings_prop_tile.dart';
 import '../../../../widgets/section_title.dart';
+import '../../../manga_book/presentation/local_downloads/local_downloads_settings_screen.dart';
 import '../../controller/server_controller.dart';
 import '../../domain/settings/settings.dart';
 import 'data/downloads_settings_repository.dart';
@@ -36,6 +37,19 @@ class DownloadsSettingsScreen extends ConsumerWidget {
               }
               return ListView(
                 children: [
+                  SectionTitle(title: "Local Downloads"),
+                  ListTile(
+                    title: Text("Local Downloads Settings"),
+                    subtitle: Text("Configure on-device downloads storage"),
+                    trailing: Icon(Icons.arrow_forward_ios),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const LocalDownloadsSettingsScreen(),
+                        ),
+                      );
+                    },
+                  ),
                   SectionTitle(title: context.l10n.general),
                   SettingsPropTile(
                     title: context.l10n.downloadLocation,

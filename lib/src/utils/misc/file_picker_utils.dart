@@ -53,4 +53,16 @@ abstract class FilePickerUtils {
       );
     }
   }
+
+  static Future<String?> pickDirectory({
+    BuildContext? context,
+  }) async {
+    final directoryPath = await FilePicker.platform.getDirectoryPath();
+    if (context != null && context.mounted) {
+      if (directoryPath == null || directoryPath.isEmpty) {
+        throw context.l10n.errorFilePick;
+      }
+    }
+    return directoryPath;
+  }
 }

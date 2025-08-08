@@ -28,4 +28,9 @@ sealed class SettingsPropType<T> with _$SettingsPropType {
     bool? value,
     SettingsUpdateRequest<T, bool>? onChanged,
   }) = SwitchProp;
+  const factory SettingsPropType.directoryPicker({
+    String? value,
+    String? hintText,
+    SettingsUpdateRequest<T, String>? onChanged,
+  }) = DirectoryPickerProp;
 }
