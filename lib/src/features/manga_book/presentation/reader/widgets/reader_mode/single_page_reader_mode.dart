@@ -17,12 +17,12 @@ import '../../../../../../utils/extensions/cache_manager_extensions.dart';
 import '../../../../../../utils/extensions/custom_extensions.dart';
 import '../../../../../../utils/misc/app_utils.dart';
 import '../../../../../../widgets/custom_circular_progress_indicator.dart';
-import '../../../../../../widgets/server_image.dart';
 import '../../../../../settings/presentation/reader/widgets/reader_scroll_animation_tile/reader_scroll_animation_tile.dart';
 import '../../../../domain/chapter/chapter_model.dart';
 import '../../../../domain/chapter_page/chapter_page_model.dart';
 import '../../../../domain/manga/manga_model.dart';
 import '../reader_wrapper.dart';
+import '../chapter_page_image.dart';
 
 class SinglePageReaderMode extends HookConsumerWidget {
   const SinglePageReaderMode({
@@ -132,12 +132,14 @@ class SinglePageReaderMode extends HookConsumerWidget {
             );
           }
 
-          final image = ServerImage(
-            showReloadButton: true,
+          final image = ChapterPageImage(
+            imageUrl: chapterPages.pages[index],
+            mangaId: manga.id,
+            chapterId: chapter.id,
+            pageIndex: index,
             fit: BoxFit.contain,
             size: Size.fromHeight(context.height),
-            appendApiToUrl: false,
-            imageUrl: chapterPages.pages[index],
+            showReloadButton: true,
             progressIndicatorBuilder: (context, url, downloadProgress) =>
                 CenterSorayomiShimmerIndicator(
               value: downloadProgress.progress,

@@ -13,6 +13,7 @@ import '../../../../utils/misc/toast/toast.dart';
 import '../../../../widgets/emoticons.dart';
 import '../../data/downloads/downloads_repository.dart';
 import '../../domain/downloads/downloads_model.dart';
+import '../local_downloads/local_downloads_screen.dart';
 import 'controller/downloads_controller.dart';
 import 'widgets/download_progress_list_tile.dart';
 import 'widgets/downloads_fab.dart';
@@ -26,10 +27,18 @@ class DownloadsScreen extends ConsumerWidget {
     final downloadsChapterIds = ref.watch(downloadsChapterIdsProvider);
     final downloadsGlobalStatus = ref.watch(downloaderStateProvider);
     final showDownloadsFAB = ref.watch(showDownloadsFABProvider);
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(context.l10n.downloads),
-        actions: [
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(context.l10n.downloads),
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Server'),
+              Tab(text: 'Local'),
+            ],
+          ),
+          actions: [
           if ((downloadsChapterIds).isNotBlank)
             IconButton(
               onPressed: () => AsyncValue.guard(
@@ -37,44 +46,51 @@ class DownloadsScreen extends ConsumerWidget {
               ),
               icon: const Icon(Icons.delete_sweep_rounded),
             ),
-        ],
-      ),
-      floatingActionButton: showDownloadsFAB
-          ? DownloadsFab(
-              status:
-                  downloadsGlobalStatus.valueOrNull ?? DownloaderState.STARTED)
-          : null,
-      body: downloadsGlobalStatus.showUiWhenData(
-        context,
-        (data) {
-          if (data == null) {
-            return Emoticons(title: context.l10n.errorSomethingWentWrong);
-          } else if (downloadsChapterIds.isBlank) {
-            return Emoticons(title: context.l10n.noDownloads);
-          } else {
-            final downloadsCount =
-                (downloadsChapterIds.length).getValueOnNullOrNegative();
-            return RefreshIndicator(
-              onRefresh: () => ref.refresh(downloadStatusProvider.future),
-              child: ListView.builder(
-                itemExtent: 104,
-                itemBuilder: (context, index) {
-                  if (index == downloadsCount) return const Gap(104);
-                  final chapterId = downloadsChapterIds[index];
-                  return DownloadProgressListTile(
-                    key: ValueKey("$chapterId"),
-                    index: index,
-                    downloadsCount: downloadsCount,
-                    chapterId: chapterId,
-                    toast: toast,
+          ],
+        ),
+        floatingActionButton: showDownloadsFAB
+            ? DownloadsFab(
+                status: downloadsGlobalStatus.valueOrNull ??
+                    DownloaderState.STARTED)
+            : null,
+        body: TabBarView(
+          children: [
+            downloadsGlobalStatus.showUiWhenData(
+              context,
+              (data) {
+                if (data == null) {
+                  return Emoticons(title: context.l10n.errorSomethingWentWrong);
+                } else if (downloadsChapterIds.isBlank) {
+                  return Emoticons(title: context.l10n.noDownloads);
+                } else {
+                  final downloadsCount =
+                      (downloadsChapterIds.length).getValueOnNullOrNegative();
+                  return RefreshIndicator(
+                    onRefresh: () =>
+                        ref.refresh(downloadStatusProvider.future),
+                    child: ListView.builder(
+                      itemExtent: 104,
+                      itemBuilder: (context, index) {
+                        if (index == downloadsCount) return const Gap(104);
+                        final chapterId = downloadsChapterIds[index];
+                        return DownloadProgressListTile(
+                          key: ValueKey("$chapterId"),
+                          index: index,
+                          downloadsCount: downloadsCount,
+                          chapterId: chapterId,
+                          toast: toast,
+                        );
+                      },
+                      itemCount: downloadsCount + 1,
+                    ),
                   );
-                },
-                itemCount: downloadsCount + 1,
-              ),
-            );
-          }
-        },
-        showGenericError: true,
+                }
+              },
+              showGenericError: true,
+            ),
+            const LocalDownloadsScreen(),
+          ],
+        ),
       ),
     );
   }

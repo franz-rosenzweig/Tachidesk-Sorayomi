@@ -16,7 +16,7 @@ import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../../../../utils/extensions/custom_extensions.dart';
 import '../../../../../../utils/misc/app_utils.dart';
-import '../../../../../../widgets/server_image.dart';
+import '../../widgets/chapter_page_image.dart';
 import '../../../../../settings/presentation/reader/widgets/reader_pinch_to_zoom/reader_pinch_to_zoom.dart';
 import '../../../../../settings/presentation/reader/widgets/reader_scroll_animation_tile/reader_scroll_animation_tile.dart';
 import '../../../../domain/chapter/chapter_model.dart';
@@ -201,13 +201,15 @@ class ContinuousReaderMode extends HookConsumerWidget {
           separatorBuilder: (BuildContext context, int index) =>
               showSeparator ? const Gap(16) : const SizedBox.shrink(),
           itemBuilder: (BuildContext context, int index) {
-            final Widget image = ServerImage(
-              showReloadButton: true,
+            final Widget image = ChapterPageImage(
+              imageUrl: chapterPages.pages[index],
+              mangaId: manga.id,
+              chapterId: chapter.id,
+              pageIndex: index,
               fit: scrollDirection == Axis.vertical
                   ? BoxFit.fitWidth
                   : BoxFit.fitHeight,
-              appendApiToUrl: false,
-              imageUrl: chapterPages.pages[index],
+              showReloadButton: true,
               progressIndicatorBuilder: (_, __, downloadProgress) => Center(
                 child: CircularProgressIndicator(
                   value: downloadProgress.progress,

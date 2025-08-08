@@ -7,9 +7,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:gap/gap.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../../../../routes/router_config.dart';
 import '../../../../../utils/extensions/custom_extensions.dart';
+import '../../../data/local_downloads/local_downloads_repository.dart';
 import '../../../domain/chapter/chapter_model.dart';
 import '../../../domain/manga/manga_model.dart';
 import '../../../widgets/download_status_icon.dart';
@@ -86,11 +88,82 @@ class ChapterListTile extends StatelessWidget {
               ),
           ],
         ),
-        trailing: DownloadStatusIcon(
-          updateData: updateData,
-          chapter: chapter,
-          mangaId: manga.id,
-          isDownloaded: chapter.isDownloaded.ifNull(),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DownloadStatusIcon(
+              updateData: updateData,
+              chapter: chapter,
+              mangaId: manga.id,
+              isDownloaded: chapter.isDownloaded.ifNull(),
+            ),
+            const Gap(4),
+            Consumer(builder: (context, ref, _) {
+              final isLocallyDownloaded = ref.watch(
+                isChapterDownloadedProvider((manga.id, chapter.id)),
+              );
+              return PopupMenuButton<String>(
+                tooltip: 'Local actions',
+                onSelected: (value) async {
+                  switch (value) {
+                    case 'download':
+                      try {
+                        await ref
+                            .read(localDownloadsRepositoryProvider)
+                            .downloadChapter(
+                              ref,
+                              mangaId: manga.id,
+                              chapterId: chapter.id,
+                              mangaTitle: manga.title,
+                              chapterName: chapter.name,
+                            );
+                        // Refresh local download status
+                        ref.invalidate(isChapterDownloadedProvider((manga.id, chapter.id)));
+                      } catch (e) {
+                        // Show error if needed
+                      }
+                      break;
+                    case 'delete':
+                      await ref
+                          .read(localDownloadsRepositoryProvider)
+                          .deleteLocalChapter(manga.id, chapter.id);
+                      // Refresh local download status
+                      ref.invalidate(isChapterDownloadedProvider((manga.id, chapter.id)));
+                      break;
+                  }
+                },
+                itemBuilder: (context) {
+                  return isLocallyDownloaded.when(
+                    data: (isDownloaded) => [
+                      if (!isDownloaded)
+                        const PopupMenuItem(
+                          value: 'download',
+                          child: Text('Download to device'),
+                        ),
+                      if (isDownloaded)
+                        const PopupMenuItem(
+                          value: 'delete',
+                          child: Text('Delete local'),
+                        ),
+                    ],
+                    loading: () => const [
+                      PopupMenuItem(
+                        value: 'download',
+                        child: Text('Download to device'),
+                      ),
+                    ],
+                    error: (_, __) => const [
+                      PopupMenuItem(
+                        value: 'download',
+                        child: Text('Download to device'),
+                      ),
+                    ],
+                  );
+                },
+                icon: const Icon(Icons.more_vert),
+              );
+            }),
+          ],
         ),
         selectedColor: context.theme.colorScheme.onSurface,
         selectedTileColor:
