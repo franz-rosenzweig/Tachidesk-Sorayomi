@@ -457,7 +457,7 @@ class ReaderWrapper extends HookConsumerWidget {
                             currentValue: currentIndex,
                             maxValue: chapterPages.chapter.pageCount,
                             onChanged: (index) => onChanged(index),
-                            inverted: invertTap,
+                            inverted: _isRTLReaderMode(resolvedReaderMode),
                           ),
                         ),
                         Card(
