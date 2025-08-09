@@ -17,6 +17,7 @@ import 'global_providers/global_providers.dart';
 import 'l10n/generated/app_localizations.dart';
 import 'routes/router_config.dart';
 import 'utils/extensions/custom_extensions.dart';
+import 'widgets/offline_bootstrap_wrapper.dart';
 
 class Sorayomi extends ConsumerWidget {
   const Sorayomi({super.key});
@@ -31,30 +32,32 @@ class Sorayomi extends ConsumerWidget {
     final client = ref.watch(graphQlClientNotifierProvider);
     return GraphQLProvider(
       client: client,
-      child: MaterialApp.router(
-        builder: FToastBuilder(),
-        onGenerateTitle: (context) => context.l10n.appTitle,
-        debugShowCheckedModeBanner: false,
-        theme: FlexThemeData.light(
-          scheme: appScheme,
-          useMaterial3: true,
-          useMaterial3ErrorColors: true,
-        ).copyWith(
-          tabBarTheme: const TabBarThemeData(tabAlignment: TabAlignment.center),
+      child: OfflineBootstrapWrapper(
+        child: MaterialApp.router(
+          builder: FToastBuilder(),
+          onGenerateTitle: (context) => context.l10n.appTitle,
+          debugShowCheckedModeBanner: false,
+          theme: FlexThemeData.light(
+            scheme: appScheme,
+            useMaterial3: true,
+            useMaterial3ErrorColors: true,
+          ).copyWith(
+            tabBarTheme: const TabBarThemeData(tabAlignment: TabAlignment.center),
+          ),
+          darkTheme: FlexThemeData.dark(
+            scheme: appScheme,
+            useMaterial3: true,
+            useMaterial3ErrorColors: true,
+            darkIsTrueBlack: isTrueBlack.ifNull(),
+          ).copyWith(
+            tabBarTheme: const TabBarThemeData(tabAlignment: TabAlignment.center),
+          ),
+          themeMode: themeMode ?? ThemeMode.system,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          locale: appLocale,
+          routerConfig: routes,
         ),
-        darkTheme: FlexThemeData.dark(
-          scheme: appScheme,
-          useMaterial3: true,
-          useMaterial3ErrorColors: true,
-          darkIsTrueBlack: isTrueBlack.ifNull(),
-        ).copyWith(
-          tabBarTheme: const TabBarThemeData(tabAlignment: TabAlignment.center),
-        ),
-        themeMode: themeMode ?? ThemeMode.system,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        locale: appLocale,
-        routerConfig: routes,
       ),
     );
   }

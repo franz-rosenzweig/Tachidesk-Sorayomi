@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../data/manga_book/manga_book_repository.dart';
 import '../../../data/local_downloads/local_downloads_repository.dart';
+import '../../../data/offline_bootstrap_service.dart';
 import '../../../domain/chapter/chapter_model.dart';
 import '../../../domain/chapter_page/chapter_page_model.dart';
 import '../../../domain/local_downloads/local_downloads_model.dart';
@@ -91,14 +92,8 @@ Future<LocalChapterManifest?> localChapterPages(
   int mangaId, 
   int chapterId,
 ) async {
-  final repo = LocalDownloadsRepository(ref);
-  final manifest = await repo.getLocalChapterManifest(mangaId, chapterId);
-  
-  if (kDebugMode && manifest != null) {
-    print('LocalChapterPages: Found local manifest for manga $mangaId, chapter $chapterId with ${manifest.pageFiles.length} pages');
-  }
-  
-  return manifest;
+  // Redirect to new provider
+  return await ref.watch(localChapterManifestProvider(mangaId, chapterId).future);
 }
 
 // Unified provider that decides between local and network
@@ -108,36 +103,105 @@ Future<ChapterPagesResult> chapterPagesUnified(
   int mangaId, 
   int chapterId,
 ) async {
+  // NEW: Use decision provider for early branching
+  return await ref.watch(chapterPagesDecisionProvider(mangaId, chapterId).future);
+}
+
+// NEW: Decision provider that implements early offline/online branching
+@riverpod
+Future<ChapterPagesResult> chapterPagesDecision(
+  Ref ref,
+  int mangaId,
+  int chapterId,
+) async {
+  if (kDebugMode) {
+    print('ChapterPagesDecision: Starting decision for manga $mangaId, chapter $chapterId');
+  }
+  
   try {
-    // First check if we have a local manifest
-    final localManifest = await ref.watch(localChapterPagesProvider(mangaId, chapterId).future);
+    // Get app mode synchronously (no await)
+    final appMode = ref.read(appModeProviderProvider);
+    final isOfflineMode = appMode == AppMode.offline;
     
+    if (kDebugMode) {
+      print('ChapterPagesDecision: App mode is $appMode, offline mode: $isOfflineMode');
+    }
+    
+    // Check for local manifest first
+    final localManifest = await ref.watch(localChapterManifestProvider(mangaId, chapterId).future);
+    
+    if (isOfflineMode) {
+      // OFFLINE MODE: Only use local, never attempt network
+      if (localManifest != null) {
+        if (kDebugMode) {
+          print('ChapterPagesDecision: OFFLINE - Using local manifest with ${localManifest.pageFiles.length} pages');
+        }
+        return ChapterPagesResult.local(localManifest);
+      } else {
+        if (kDebugMode) {
+          print('ChapterPagesDecision: OFFLINE - No local manifest available');
+        }
+        throw OfflineNotAvailableException('Chapter $chapterId not downloaded and device is offline');
+      }
+    }
+    
+    // ONLINE MODE: Prefer local if available, fallback to network
     if (localManifest != null) {
       if (kDebugMode) {
-        print('ChapterPagesUnified: Using local pages for manga $mangaId, chapter $chapterId');
+        print('ChapterPagesDecision: ONLINE - Local manifest available, using local pages');
       }
       return ChapterPagesResult.local(localManifest);
     }
     
-    // Check connectivity
-    final isOnline = await ref.watch(connectivityStatusProvider.future);
-    if (!isOnline) {
-      throw OfflineNotAvailableException(
-        'Chapter $chapterId not downloaded and device is offline'
-      );
-    }
-    
     // Fallback to network
     if (kDebugMode) {
-      print('ChapterPagesUnified: Using network pages for manga $mangaId, chapter $chapterId');
+      print('ChapterPagesDecision: ONLINE - No local manifest, fetching from network');
     }
+    
     final networkPages = await ref.watch(chapterPagesProvider(chapterId: chapterId).future);
+    if (kDebugMode) {
+      print('ChapterPagesDecision: Network pages loaded, ${networkPages?.pages.length ?? 0} pages');
+    }
+    
     return ChapterPagesResult.remote(networkPages);
     
   } catch (e) {
     if (kDebugMode) {
-      print('ChapterPagesUnified: Error loading pages for manga $mangaId, chapter $chapterId: $e');
+      print('ChapterPagesDecision: ERROR for manga $mangaId, chapter $chapterId: $e');
+      print('ChapterPagesDecision: Error type: ${e.runtimeType}');
+      if (e is OfflineNotAvailableException) {
+        print('ChapterPagesDecision: This is an offline availability error - expected behavior');
+      } else {
+        print('ChapterPagesDecision: This is an unexpected error that should be investigated');
+      }
     }
     rethrow;
   }
+}
+
+// NEW: Local manifest provider (replaces localChapterPages)
+@riverpod
+Future<LocalChapterManifest?> localChapterManifest(
+  Ref ref, 
+  int mangaId, 
+  int chapterId,
+) async {
+  if (kDebugMode) {
+    print('LocalChapterManifest: Checking for manifest - manga $mangaId, chapter $chapterId');
+  }
+  
+  final repo = LocalDownloadsRepository(ref);
+  final manifest = await repo.getLocalChapterManifest(mangaId, chapterId);
+  
+  if (kDebugMode) {
+    if (manifest != null) {
+      print('LocalChapterManifest: Found manifest with ${manifest.pageFiles.length} pages');
+      print('LocalChapterManifest: Chapter: ${manifest.chapterName}');
+      print('LocalChapterManifest: Manga: ${manifest.mangaTitle}');
+    } else {
+      print('LocalChapterManifest: No manifest found');
+    }
+  }
+  
+  return manifest;
 }

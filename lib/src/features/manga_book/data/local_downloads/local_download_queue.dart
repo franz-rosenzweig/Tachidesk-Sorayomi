@@ -160,11 +160,15 @@ class DownloadQueueState {
   final List<ChapterDownloadTask> tasks;
   final bool isActive;
   final int maxConcurrentDownloads;
+  final int maxConcurrentPagesPerChapter; // Phase 7.1: Limit concurrent page downloads
+  final bool isPaused;                     // Phase 7.5: Pause/Cancel queue functionality
   
   const DownloadQueueState({
     required this.tasks,
     required this.isActive,
-    this.maxConcurrentDownloads = 1, // Sequential for now
+    this.maxConcurrentDownloads = 1,     // Phase 7.2: Sequential by default
+    this.maxConcurrentPagesPerChapter = 4, // Phase 7.1: 4 pages per chapter max
+    this.isPaused = false,
   });
   
   List<ChapterDownloadTask> get queuedTasks => 
@@ -183,11 +187,15 @@ class DownloadQueueState {
     List<ChapterDownloadTask>? tasks,
     bool? isActive,
     int? maxConcurrentDownloads,
+    int? maxConcurrentPagesPerChapter,
+    bool? isPaused,
   }) {
     return DownloadQueueState(
       tasks: tasks ?? this.tasks,
       isActive: isActive ?? this.isActive,
       maxConcurrentDownloads: maxConcurrentDownloads ?? this.maxConcurrentDownloads,
+      maxConcurrentPagesPerChapter: maxConcurrentPagesPerChapter ?? this.maxConcurrentPagesPerChapter,
+      isPaused: isPaused ?? this.isPaused,
     );
   }
 }
@@ -312,9 +320,9 @@ class LocalDownloadQueue extends _$LocalDownloadQueue {
     }
   }
   
-  /// Pause/resume queue processing
+  /// Pause/resume queue processing (Phase 7.5)
   void pauseQueue() {
-    state = state.copyWith(isActive: false);
+    state = state.copyWith(isActive: false, isPaused: true);
     _queueProcessor?.cancel();
     
     if (kDebugMode) {
@@ -324,7 +332,23 @@ class LocalDownloadQueue extends _$LocalDownloadQueue {
   
   void resumeQueue() {
     if (!state.isActive && state.queuedTasks.isNotEmpty) {
+      state = state.copyWith(isPaused: false);
       _startQueueProcessing();
+    }
+  }
+  
+  /// Configure download concurrency settings (Phase 7.1 & 7.2)
+  void configureConcurrency({
+    int? maxConcurrentDownloads,
+    int? maxConcurrentPagesPerChapter,
+  }) {
+    state = state.copyWith(
+      maxConcurrentDownloads: maxConcurrentDownloads,
+      maxConcurrentPagesPerChapter: maxConcurrentPagesPerChapter,
+    );
+    
+    if (kDebugMode) {
+      print('LocalDownloadQueue: Updated concurrency - chapters: ${state.maxConcurrentDownloads}, pages: ${state.maxConcurrentPagesPerChapter}');
     }
   }
   
@@ -345,7 +369,7 @@ class LocalDownloadQueue extends _$LocalDownloadQueue {
   
   /// Process the next available task in the queue
   Future<void> _processNextTask() async {
-    if (!state.isActive) {
+    if (!state.isActive || state.isPaused) {
       _queueProcessor?.cancel();
       return;
     }

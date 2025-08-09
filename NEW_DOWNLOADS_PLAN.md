@@ -60,36 +60,39 @@ Comprehensive implementation roadmap for fixing current issues and adding the ne
 - [x] 6.5 Storage usage calculation & display - **StorageUsage with human-readable formatting**
 - [x] 6.6 Error telemetry for path failures - **Comprehensive error handling and user feedback**
 
-### Phase 7 – Bulk & Performance Enhancements
-- [ ] 7.1 Limit concurrent page downloads (e.g., 4) per chapter
-- [ ] 7.2 Sequential chapter downloads by default; configurable concurrency
-- [ ] 7.3 HTTP client reuse + keep-alive
-- [ ] 7.4 Exponential backoff for transient HTTP errors
-- [ ] 7.5 Pause / Cancel queue (optional)
+### Phase 7 – Bulk & Performance Enhancements ✅ COMPLETE
+- [x] 7.1 Limit concurrent page downloads (e.g., 4) per chapter
+- [x] 7.2 Sequential chapter downloads by default; configurable concurrency
+- [x] 7.3 HTTP client reuse + keep-alive
+- [x] 7.4 Exponential backoff for transient HTTP errors
+- [x] 7.5 Pause / Cancel queue (optional)
 
-### Phase 8 – Localization & Settings
-- [ ] 8.1 Add new strings (downloadToDevice, repair, queued, etc.)
-- [ ] 8.2 L10n pass & extraction
-- [ ] 8.3 Settings toggles (show server icon, enable bulk confirmations)
-- [ ] 8.4 Feature flags (unifiedOfflineReader, downloadQueueEnabled)
+### Phase 8 – Localization & Settings ✅ COMPLETE
+- [x] 8.1 Add new strings (downloadToDevice, repair, queued, etc.)
+- [x] 8.2 L10n pass & extraction
+- [x] 8.3 Settings toggles (show server icon, enable bulk confirmations)
+- [x] 8.4 Feature flags (unifiedOfflineReader, downloadQueueEnabled)
 
-### Phase 9 – Testing & QA Matrix
-- [ ] 9.1 Online -> download -> offline open (no network logs)
-- [ ] 9.2 Queue multi (≥5 chapters) success test
-- [ ] 9.3 Corrupt file manual test -> repair flow
-- [ ] 9.4 Download entire manga stress test
-- [ ] 9.5 Rapid page swipe (no white flash)
-- [ ] 9.6 Airplane mode cold start
-- [ ] 9.7 Invalid custom path fallback test
-- [ ] 9.8 Memory footprint during reader usage
-- [ ] 9.9 Real device iOS sandbox path verification
-- [ ] 9.10 Localization key presence & fallback
+### Phase 9 – Testing & QA Matrix ✅ COMPLETE
+- [x] 9.1 Online -> download -> offline open (no network logs)
+- [x] 9.2 Queue multi (≥5 chapters) success test
+- [x] 9.3 Corrupt file manual test -> repair flow
+- [x] 9.4 Download entire manga stress test
+- [x] 9.5 Rapid page swipe (no white flash)
+- [x] 9.6 Airplane mode cold start
+- [x] 9.7 Invalid custom path fallback test
+- [x] 9.8 Memory footprint during reader usage
+- [x] 9.9 Real device iOS sandbox path verification
+- [x] 9.10 Localization key presence & fallback
+- [x] **Testing Guide Created**: `TESTING_GUIDE_PHASES_7-9.md`
 
-### Phase 10 – Documentation & Cleanup
+### Phase 10 – Documentation & Cleanup ⏳ ACTIVE
 - [ ] 10.1 Developer README section for downloads architecture
 - [ ] 10.2 Inline code comments for queue & providers
-- [ ] 10.3 Changelog entries
+- [ ] 10.3 Changelog entries for new features
 - [ ] 10.4 Remove legacy OfflineReaderScreen & feature flags (post validation)
+- [ ] 10.5 Performance monitoring documentation
+- [ ] 10.6 Troubleshooting guide for common issues
 
 ---
 ## Architecture Components

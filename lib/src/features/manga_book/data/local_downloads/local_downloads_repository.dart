@@ -15,7 +15,9 @@ import '../../../../features/settings/presentation/server/widget/credential_popu
 import '../../../../global_providers/global_providers.dart';
 import '../../../../utils/extensions/custom_extensions.dart';
 import '../../domain/local_downloads/local_downloads_model.dart';
+import '../../domain/offline_catalog/offline_catalog_model.dart';
 import '../manga_book/manga_book_repository.dart';
+import '../offline_catalog_repository.dart';
 import 'local_downloads_settings_repository.dart';
 import 'storage_migration_manager.dart';
 import 'storage_path_resolver.dart';
@@ -25,6 +27,15 @@ class LocalDownloadsRepository {
   static const manifestFileName = 'manifest.json';
 
   final Ref _ref;
+  
+  // Phase 7.3: HTTP client reuse + keep-alive
+  static HttpClient? _sharedHttpClient;
+  static HttpClient get _httpClient {
+    _sharedHttpClient ??= HttpClient()
+      ..connectionTimeout = const Duration(seconds: 30)
+      ..idleTimeout = const Duration(seconds: 10);
+    return _sharedHttpClient!;
+  }
   
   LocalDownloadsRepository(this._ref);
 
@@ -60,8 +71,19 @@ class LocalDownloadsRepository {
       
       if (kDebugMode) {
         print('LocalDownloadsRepository: Using storage path: ${pathResult.directory.path} (${pathResult.description})');
+        print('LocalDownloadsRepository: Path is reliable: ${pathResult.isReliable}');
+        print('LocalDownloadsRepository: Directory exists: ${await pathResult.directory.exists()}');
         if (!pathResult.isReliable) {
           print('LocalDownloadsRepository: WARNING - Using temporary storage path that may be cleared');
+        }
+        
+        // List contents if directory exists
+        if (await pathResult.directory.exists()) {
+          final contents = await pathResult.directory.list().toList();
+          print('LocalDownloadsRepository: Directory contains ${contents.length} items');
+          for (final item in contents.take(5)) { // Show first 5 items
+            print('  - ${item.path} (${item is File ? 'file' : 'dir'})');
+          }
         }
       }
       
@@ -112,18 +134,6 @@ class LocalDownloadsRepository {
     // Default path: Use iOS-safe Documents directory
     final docs = await getApplicationDocumentsDirectory();
     
-    // TEMPORARY FIX: Check if downloads exist in File Provider Storage location
-    // This handles the case where downloads were saved to a different location
-    final fileProviderPath = "/Users/home/Library/Developer/CoreSimulator/Devices/BE87C899-F379-4995-B9AC-E5EFA09E6054/data/Containers/Shared/AppGroup/8F6C4E93-B0BB-43CF-8F8E-F695F35FE799/File Provider Storage/Manga";
-    final fileProviderDir = Directory(p.join(fileProviderPath, downloadsFolderName));
-    
-    if (await fileProviderDir.exists()) {
-      if (kDebugMode) {
-        print('Found downloads in File Provider Storage, using: ${fileProviderDir.path}');
-      }
-      return fileProviderDir;
-    }
-    
     final dir = Directory(p.join(docs.path, downloadsFolderName));
     if (kDebugMode) {
       print('Getting default documents directory: ${docs.path}');
@@ -137,6 +147,11 @@ class LocalDownloadsRepository {
       print('Final downloads directory: ${dir.path}');
     }
     return dir;
+  }
+
+  /// Get base downloads directory
+  Future<Directory> getBaseDirectory() async {
+    return await _baseDir();
   }
 
   /// Get chapter directory
@@ -306,7 +321,7 @@ class LocalDownloadsRepository {
     );
   }
 
-  /// Enhanced download method with progress tracking and retry logic
+  /// Enhanced download method with progress tracking and retry logic (Phase 7.1 & 7.4)
   Future<List<File>> _downloadPagesToChapterWithProgress(
     Ref ref, {
     required int mangaId,
@@ -314,68 +329,94 @@ class LocalDownloadsRepository {
     required List<String> pageUrls,
     void Function(int pagesDownloaded, int totalPages)? onProgress,
     int maxRetries = 3,
+    int maxConcurrentPages = 4, // Phase 7.1: Limit concurrent page downloads
   }) async {
     final dir = await _chapterDir(mangaId, chapterId);
     final saved = <File>[];
 
-    for (var i = 0; i < pageUrls.length; i++) {
-      final url = pageUrls[i];
-      final fileName = 'page_${(i + 1).toString().padLeft(4, '0')}.jpg';
-      final dest = File(p.join(dir.path, fileName));
+    // Phase 7.1: Process pages in batches with limited concurrency
+    for (int batchStart = 0; batchStart < pageUrls.length; batchStart += maxConcurrentPages) {
+      final batchEnd = (batchStart + maxConcurrentPages).clamp(0, pageUrls.length);
+      final batch = pageUrls.sublist(batchStart, batchEnd);
       
-      bool success = false;
-      int attempts = 0;
-      Exception? lastError;
-      
-      while (!success && attempts < maxRetries) {
-        attempts++;
+      // Download batch concurrently
+      final futures = batch.asMap().entries.map((entry) async {
+        final batchIndex = entry.key;
+        final globalIndex = batchStart + batchIndex;
+        final url = entry.value;
+        final fileName = 'page_${(globalIndex + 1).toString().padLeft(4, '0')}.jpg';
+        final dest = File(p.join(dir.path, fileName));
         
-        try {
-          if (kDebugMode) {
-            print('downloadChapterWithProgress PAGE_START: $i/$pageUrls.length (attempt $attempts)');
-          }
+        bool success = false;
+        int attempts = 0;
+        Exception? lastError;
+        
+        while (!success && attempts < maxRetries) {
+          attempts++;
           
-          await _downloadSinglePage(ref, url, dest, i);
-          
-          saved.add(dest);
-          success = true;
-          
-          if (kDebugMode) {
-            print('downloadChapterWithProgress PAGE_SAVED: $i/$pageUrls.length');
-          }
-          
-          // Report progress after each successful page
-          onProgress?.call(saved.length, pageUrls.length);
-          
-        } catch (e) {
-          lastError = e is Exception ? e : Exception(e.toString());
-          
-          if (kDebugMode) {
-            print('downloadChapterWithProgress PAGE_FAILED: $i/$pageUrls.length (attempt $attempts): $e');
-          }
-          
-          // Clean up failed attempt
-          if (await dest.exists()) {
-            try {
-              await dest.delete();
-            } catch (deleteError) {
+          try {
+            if (kDebugMode) {
+              print('downloadChapterWithProgress PAGE_START: $globalIndex/${pageUrls.length} (attempt $attempts)');
+            }
+            
+            // Phase 7.4: Exponential backoff for retries
+            if (attempts > 1) {
+              final backoffMs = 500 * (1 << (attempts - 2)); // 500ms, 1s, 2s
+              await Future.delayed(Duration(milliseconds: backoffMs));
               if (kDebugMode) {
-                print('Failed to delete corrupted file: $deleteError');
+                print('Retrying after ${backoffMs}ms backoff');
               }
             }
-          }
-          
-          // Wait before retry (exponential backoff)
-          if (attempts < maxRetries) {
-            final delay = Duration(milliseconds: 500 * attempts);
-            await Future.delayed(delay);
+            
+            await _downloadSinglePage(ref, url, dest, globalIndex);
+            
+            success = true;
+            
+            if (kDebugMode) {
+              print('downloadChapterWithProgress PAGE_SAVED: $globalIndex/${pageUrls.length}');
+            }
+            
+            return dest;
+            
+          } catch (e) {
+            lastError = e is Exception ? e : Exception(e.toString());
+            
+            if (kDebugMode) {
+              print('downloadChapterWithProgress PAGE_FAILED: $globalIndex/$pageUrls.length (attempt $attempts): $e');
+            }
+            
+            // Clean up failed attempt
+            if (await dest.exists()) {
+              try {
+                await dest.delete();
+              } catch (deleteError) {
+                if (kDebugMode) {
+                  print('Failed to delete corrupted file: $deleteError');
+                }
+              }
+            }
+            
+            // Wait before retry (exponential backoff)
+            if (attempts < maxRetries) {
+              final delay = Duration(milliseconds: 500 * attempts);
+              await Future.delayed(delay);
+            }
           }
         }
-      }
+        
+        if (!success) {
+          throw Exception('Failed to download page $globalIndex after $maxRetries attempts: ${lastError?.toString() ?? 'Unknown error'}');
+        }
+        
+        return dest;
+      });
       
-      if (!success) {
-        throw Exception('Failed to download page $i after $maxRetries attempts: ${lastError?.toString() ?? 'Unknown error'}');
-      }
+      // Wait for batch to complete
+      final batchFiles = await Future.wait(futures);
+      saved.addAll(batchFiles);
+      
+      // Update progress after each batch
+      onProgress?.call(saved.length, pageUrls.length);
     }
     
     return saved;
@@ -601,6 +642,9 @@ class LocalDownloadsRepository {
       print('downloadChapterWithProgress COMPLETE: chapter $chapterId');
     }
 
+    // NEW: Update offline catalog after successful download
+    await _updateOfflineCatalogAfterDownload(manifest, mangaTitle, mangaThumbnailUrl);
+
     // Report final progress
     onProgress?.call(pageUrls.length, pageUrls.length);
   }
@@ -771,6 +815,77 @@ class LocalDownloadsRepository {
       await baseDir.delete(recursive: true);
       await baseDir.create(recursive: true);
     }
+  }
+
+  /// Update offline catalog after successful download
+  Future<void> _updateOfflineCatalogAfterDownload(
+    LocalChapterManifest manifest,
+    String mangaTitle,
+    String? mangaThumbnailUrl,
+  ) async {
+    try {
+      if (kDebugMode) {
+        print('LocalDownloadsRepository: Updating offline catalog for manga ${manifest.mangaId}, chapter ${manifest.chapterId}');
+      }
+      
+      final catalogRepo = OfflineCatalogRepository(this);
+      final catalog = await catalogRepo.load();
+      
+      // Upsert manga entry
+      final mangaEntry = MangaEntry(
+        mangaId: manifest.mangaId,
+        sourceId: 'unknown', // Will be enriched later if needed
+        title: mangaTitle,
+        cover: mangaThumbnailUrl != null ? 'catalog/covers/manga_${manifest.mangaId}.jpg' : null,
+        lastUpdated: manifest.savedAt.millisecondsSinceEpoch,
+      );
+      
+      await catalogRepo.upsertManga(catalog, mangaEntry);
+      
+      // Upsert chapter entry
+      final chapterEntry = ChapterEntry(
+        chapterId: manifest.chapterId,
+        mangaId: manifest.mangaId,
+        name: manifest.chapterName,
+        number: _extractChapterNumber(manifest.chapterName),
+        pageCount: manifest.pageCount,
+        downloadedAt: manifest.savedAt.millisecondsSinceEpoch,
+        readPage: 0,
+      );
+      
+      await catalogRepo.upsertChapter(catalog, manifest.mangaId, chapterEntry);
+      
+      if (kDebugMode) {
+        print('LocalDownloadsRepository: Offline catalog updated successfully');
+      }
+      
+    } catch (e) {
+      if (kDebugMode) {
+        print('LocalDownloadsRepository: Failed to update offline catalog: $e');
+      }
+      // Don't rethrow - catalog update failure shouldn't fail the download
+    }
+  }
+
+  /// Extract chapter number from chapter name (duplicated for now)
+  double _extractChapterNumber(String chapterName) {
+    final patterns = [
+      RegExp(r'Chapter (\d+(?:\.\d+)?)', caseSensitive: false),
+      RegExp(r'Ch\.? (\d+(?:\.\d+)?)', caseSensitive: false),
+      RegExp(r'^(\d+(?:\.\d+)?)'),
+    ];
+    
+    for (final pattern in patterns) {
+      final match = pattern.firstMatch(chapterName);
+      if (match != null) {
+        final numberStr = match.group(1);
+        if (numberStr != null) {
+          return double.tryParse(numberStr) ?? 0.0;
+        }
+      }
+    }
+    
+    return 0.0;
   }
 }
 

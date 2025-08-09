@@ -228,6 +228,45 @@
     "@downloads": {
         "description": "Screen title and Navigation text of Downloads screen"
     },
+    "@downloadToDevice": {
+        "description": "Button text to download chapters to device storage"
+    },
+    "@downloadToServer": {
+        "description": "Button text to download chapters to server storage"
+    },
+    "@deviceDownload": {
+        "description": "Text label for device download option"
+    },
+    "@serverDownload": {
+        "description": "Text label for server download option"  
+    },
+    "@queued": {
+        "description": "Text to show chapters are queued for download"
+    },
+    "@repairing": {
+        "description": "Text to show chapters are being repaired"
+    },
+    "@repairNeeded": {
+        "description": "Text to show chapters need repair"
+    },
+    "@corrupted": {
+        "description": "Text to show chapters are corrupted"
+    },
+    "@downloadQueue": {
+        "description": "Text for download queue status"
+    },
+    "@pauseDownloads": {
+        "description": "Button text to pause download queue"
+    },
+    "@resumeDownloads": {
+        "description": "Button text to resume download queue"
+    },
+    "@concurrentDownloads": {
+        "description": "Settings text for concurrent downloads limit"
+    },
+    "@concurrentPages": {
+        "description": "Settings text for concurrent pages per chapter"
+    },
     "@edit": {
         "description": "Popup button text to edit Category in Edit category screen"
     },
@@ -1011,6 +1050,19 @@
     "downloaded": "Downloaded",
     "downloading": "Downloading",
     "downloads": "Downloads",
+    "downloadToDevice": "Download to Device",
+    "downloadToServer": "Download to Server",
+    "deviceDownload": "Device Download",
+    "serverDownload": "Server Download",
+    "queued": "Queued",
+    "repairing": "Repairing",
+    "repairNeeded": "Repair Needed",
+    "corrupted": "Corrupted",
+    "downloadQueue": "Download Queue",
+    "pauseDownloads": "Pause Downloads",
+    "resumeDownloads": "Resume Downloads",
+    "concurrentDownloads": "Concurrent Downloads",
+    "concurrentPages": "Concurrent Pages",
     "edit": "Edit",
     "editCategory": "Edit Category",
     "emptyCategory": "Category name can't be Empty",
