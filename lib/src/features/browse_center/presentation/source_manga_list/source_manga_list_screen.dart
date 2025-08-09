@@ -235,13 +235,6 @@ class SourceMangaListScreen extends HookConsumerWidget {
                   )
                 : null,
       ),
-      refresh: () => ref.refresh(sourceProvider(sourceId)),
-      wrapper: (body) => Scaffold(
-        appBar: AppBar(
-          title: Text(context.l10n.source),
-        ),
-        body: body,
-      ),
     );
   }
 }

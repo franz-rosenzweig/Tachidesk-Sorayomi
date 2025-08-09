@@ -112,7 +112,6 @@ class SourceScreen extends HookConsumerWidget {
           ),
         );
       },
-      refresh: refresh,
     );
   }
 }

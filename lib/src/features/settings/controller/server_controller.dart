@@ -9,8 +9,15 @@ part 'server_controller.g.dart';
 @riverpod
 class Settings extends _$Settings {
   @override
-  Future<SettingsDto?> build() =>
-      ref.watch(settingsRepositoryProvider).getServerSettings();
+  Future<SettingsDto?> build() async {
+    try {
+      return await ref.watch(settingsRepositoryProvider).getServerSettings();
+    } catch (e) {
+      // Return null for connection errors (timeout, network, etc.)
+      // This allows the UI to show offline state instead of error
+      return null;
+    }
+  }
 
   void updateState(SettingsDto value) =>
       state = state.copyWithData((_) => value);

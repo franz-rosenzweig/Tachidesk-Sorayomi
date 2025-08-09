@@ -19,6 +19,7 @@ import '../../../../../../utils/misc/app_utils.dart';
 import '../../widgets/chapter_page_image.dart';
 import '../../../../../settings/presentation/reader/widgets/reader_pinch_to_zoom/reader_pinch_to_zoom.dart';
 import '../../../../../settings/presentation/reader/widgets/reader_scroll_animation_tile/reader_scroll_animation_tile.dart';
+import '../../../../data/local_downloads/local_download_queue.dart';
 import '../../../../domain/chapter/chapter_model.dart';
 import '../../../../domain/chapter_page/chapter_page_model.dart';
 import '../../../../domain/manga/manga_model.dart';
@@ -201,6 +202,9 @@ class ContinuousReaderMode extends HookConsumerWidget {
           separatorBuilder: (BuildContext context, int index) =>
               showSeparator ? const Gap(16) : const SizedBox.shrink(),
           itemBuilder: (BuildContext context, int index) {
+            // Check if this chapter is downloaded to enable offline mode
+            final isDownloaded = ref.watch(isChapterDownloadedProvider((manga.id, chapter.id)));
+            
             final Widget image = ChapterPageImage(
               imageUrl: chapterPages.pages[index],
               mangaId: manga.id,
@@ -210,6 +214,10 @@ class ContinuousReaderMode extends HookConsumerWidget {
                   ? BoxFit.fitWidth
                   : BoxFit.fitHeight,
               showReloadButton: true,
+              forceOffline: isDownloaded.maybeWhen(
+                data: (status) => status == ChapterDownloadStatus.downloaded,
+                orElse: () => false,
+              ),
               progressIndicatorBuilder: (_, __, downloadProgress) => Center(
                 child: CircularProgressIndicator(
                   value: downloadProgress.progress,

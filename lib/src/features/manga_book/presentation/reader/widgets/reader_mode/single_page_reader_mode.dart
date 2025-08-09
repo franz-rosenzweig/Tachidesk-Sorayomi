@@ -18,6 +18,7 @@ import '../../../../../../utils/extensions/custom_extensions.dart';
 import '../../../../../../utils/misc/app_utils.dart';
 import '../../../../../../widgets/custom_circular_progress_indicator.dart';
 import '../../../../../settings/presentation/reader/widgets/reader_scroll_animation_tile/reader_scroll_animation_tile.dart';
+import '../../../../data/local_downloads/local_download_queue.dart';
 import '../../../../domain/chapter/chapter_model.dart';
 import '../../../../domain/chapter_page/chapter_page_model.dart';
 import '../../../../domain/manga/manga_model.dart';
@@ -132,6 +133,9 @@ class SinglePageReaderMode extends HookConsumerWidget {
             );
           }
 
+          // Check if chapter is downloaded to use offline mode
+          final isDownloaded = ref.watch(isChapterDownloadedProvider((manga.id, chapter.id)));
+          
           final image = ChapterPageImage(
             imageUrl: chapterPages.pages[index],
             mangaId: manga.id,
@@ -140,6 +144,10 @@ class SinglePageReaderMode extends HookConsumerWidget {
             fit: BoxFit.contain,
             size: Size.fromHeight(context.height),
             showReloadButton: true,
+            forceOffline: isDownloaded.maybeWhen(
+              data: (status) => status == ChapterDownloadStatus.downloaded,
+              orElse: () => false,
+            ),
             progressIndicatorBuilder: (context, url, downloadProgress) =>
                 CenterSorayomiShimmerIndicator(
               value: downloadProgress.progress,

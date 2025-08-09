@@ -66,7 +66,6 @@ class EditCategoryScreen extends HookConsumerWidget {
             );
           }
         },
-        refresh: () => ref.refresh(categoryControllerProvider.future),
       ),
     );
   }

@@ -53,6 +53,7 @@ enum DBKeys {
   hideEmptyCategory(false),
   pinchToZoom(true),
   readerIgnoreSafeArea(false),
+  enhancedReader(false),
   flexScheme(FlexScheme.material),
   historyEnabled(true),
   historyRetentionDays(90),

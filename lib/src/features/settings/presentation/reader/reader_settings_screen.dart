@@ -25,6 +25,7 @@ import 'widgets/reader_scroll_animation_tile/reader_scroll_animation_tile.dart';
 import 'widgets/reader_swipe_toggle_tile/reader_swipe_chapter_toggle_tile.dart';
 import 'widgets/reader_volume_tap_invert_tile/reader_volume_tap_invert_tile.dart';
 import 'widgets/reader_volume_tap_tile/reader_volume_tap_tile.dart';
+import 'widgets/enhanced_reader_tile/enhanced_reader_tile.dart';
 
 class ReaderSettingsScreen extends ConsumerWidget {
   const ReaderSettingsScreen({super.key});
@@ -37,6 +38,7 @@ class ReaderSettingsScreen extends ConsumerWidget {
       body: ListView(
         children: [
           const ReaderModeTile(),
+          const EnhancedReaderTile(),
           const ReaderNavigationLayoutTile(),
           const ReaderInvertTapTile(),
           const ReaderInitialOverlayTile(),

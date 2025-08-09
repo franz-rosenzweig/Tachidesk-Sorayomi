@@ -11,7 +11,8 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../../../../routes/router_config.dart';
 import '../../../../../utils/extensions/custom_extensions.dart';
-import '../../../data/local_downloads/local_downloads_repository.dart';
+import '../../../data/local_downloads/chapter_download_status_provider.dart';
+import '../../../data/local_downloads/local_download_queue.dart';
 import '../../../domain/chapter/chapter_model.dart';
 import '../../../domain/manga/manga_model.dart';
 import '../../../widgets/download_status_icon.dart';
@@ -25,6 +26,8 @@ class ChapterListTile extends StatelessWidget {
     required this.toggleSelect,
     this.canTapSelect = false,
     this.isSelected = false,
+    this.showServerDownloadIcon = true,
+    this.selectionMode = false,
   });
   final MangaDto manga;
   final ChapterDto chapter;
@@ -32,6 +35,8 @@ class ChapterListTile extends StatelessWidget {
   final ValueChanged<ChapterDto> toggleSelect;
   final bool canTapSelect;
   final bool isSelected;
+  final bool showServerDownloadIcon;
+  final bool selectionMode;
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -91,78 +96,32 @@ class ChapterListTile extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            DownloadStatusIcon(
-              updateData: updateData,
+            // Selection checkbox in selection mode
+            if (selectionMode) ...[
+              Checkbox(
+                value: isSelected,
+                onChanged: (_) => toggleSelect(chapter),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              const Gap(8),
+            ],
+            
+            // Device download status (local storage)
+            _DeviceDownloadIcon(
+              manga: manga,
               chapter: chapter,
-              mangaId: manga.id,
-              isDownloaded: chapter.isDownloaded.ifNull(),
+              updateData: updateData,
             ),
-            const Gap(4),
-            Consumer(builder: (context, ref, _) {
-              final isLocallyDownloaded = ref.watch(
-                isChapterDownloadedProvider((manga.id, chapter.id)),
-              );
-              return PopupMenuButton<String>(
-                tooltip: 'Local actions',
-                onSelected: (value) async {
-                  switch (value) {
-                    case 'download':
-                      try {
-                        await ref
-                            .read(localDownloadsRepositoryProvider)
-                            .downloadChapter(
-                              ref,
-                              mangaId: manga.id,
-                              chapterId: chapter.id,
-                              mangaTitle: manga.title,
-                              chapterName: chapter.name,
-                            );
-                        // Refresh local download status
-                        ref.invalidate(isChapterDownloadedProvider((manga.id, chapter.id)));
-                      } catch (e) {
-                        // Show error if needed
-                      }
-                      break;
-                    case 'delete':
-                      await ref
-                          .read(localDownloadsRepositoryProvider)
-                          .deleteLocalChapter(manga.id, chapter.id);
-                      // Refresh local download status
-                      ref.invalidate(isChapterDownloadedProvider((manga.id, chapter.id)));
-                      break;
-                  }
-                },
-                itemBuilder: (context) {
-                  return isLocallyDownloaded.when(
-                    data: (isDownloaded) => [
-                      if (!isDownloaded)
-                        const PopupMenuItem(
-                          value: 'download',
-                          child: Text('Download to device'),
-                        ),
-                      if (isDownloaded)
-                        const PopupMenuItem(
-                          value: 'delete',
-                          child: Text('Delete local'),
-                        ),
-                    ],
-                    loading: () => const [
-                      PopupMenuItem(
-                        value: 'download',
-                        child: Text('Download to device'),
-                      ),
-                    ],
-                    error: (_, __) => const [
-                      PopupMenuItem(
-                        value: 'download',
-                        child: Text('Download to device'),
-                      ),
-                    ],
-                  );
-                },
-                icon: const Icon(Icons.more_vert),
-              );
-            }),
+            
+            // Server download status (optional)
+            if (showServerDownloadIcon) ...[
+              const Gap(8),
+              _ServerDownloadIcon(
+                chapter: chapter,
+                mangaId: manga.id,
+                updateData: updateData,
+              ),
+            ],
           ],
         ),
         selectedColor: context.theme.colorScheme.onSurface,
@@ -177,6 +136,261 @@ class ChapterListTile extends StatelessWidget {
                   showReaderLayoutAnimation: true,
                 ).push(context),
         onLongPress: () => toggleSelect(chapter),
+      ),
+    );
+  }
+}
+
+/// Widget to show device download status (local storage)
+class _DeviceDownloadIcon extends ConsumerWidget {
+  const _DeviceDownloadIcon({
+    required this.manga,
+    required this.chapter,
+    required this.updateData,
+  });
+
+  final MangaDto manga;
+  final ChapterDto chapter;
+  final AsyncCallback updateData;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final downloadProgress = ref.watch(
+      chapterLocalDownloadProgressProvider(manga.id, chapter.id),
+    );
+    final localStatus = ref.watch(
+      chapterDownloadStatusProvider(manga.id, chapter.id),
+    );
+
+    return localStatus.when(
+      data: (status) {
+        // Show download progress if in queue
+        if (downloadProgress != null) {
+          switch (downloadProgress.state) {
+            case DownloadTaskState.queued:
+              return Tooltip(
+                message: 'Queued for download',
+                child: Icon(
+                  Icons.schedule,
+                  color: Colors.orange,
+                  size: 20,
+                ),
+              );
+            case DownloadTaskState.downloading:
+              return Tooltip(
+                message: 'Downloading ${downloadProgress.pagesDownloaded}/${downloadProgress.totalPages}',
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    value: downloadProgress.progress,
+                    strokeWidth: 2,
+                    color: Colors.blue,
+                  ),
+                ),
+              );
+            case DownloadTaskState.failed:
+              return Tooltip(
+                message: 'Download failed - tap to retry',
+                child: GestureDetector(
+                  onTap: () => ref
+                      .read(localDownloadQueueProvider.notifier)
+                      .retryTask('${manga.id}_${chapter.id}'),
+                  child: Icon(
+                    Icons.error_outline,
+                    color: Colors.red,
+                    size: 20,
+                  ),
+                ),
+              );
+            case DownloadTaskState.completed:
+              return Tooltip(
+                message: 'Downloaded to device',
+                child: Icon(
+                  Icons.phone_android,
+                  color: Colors.green,
+                  size: 20,
+                ),
+              );
+            default:
+              break;
+          }
+        }
+
+        // Show status based on local download state
+        switch (status) {
+          case ChapterDownloadStatus.downloaded:
+            return Tooltip(
+              message: 'Downloaded to device',
+              child: Icon(
+                Icons.phone_android,
+                color: Colors.green,
+                size: 20,
+              ),
+            );
+          case ChapterDownloadStatus.notDownloaded:
+            return Tooltip(
+              message: 'Download to device',
+              child: GestureDetector(
+                onTap: () async {
+                  await ref
+                      .read(localDownloadQueueProvider.notifier)
+                      .enqueueChapter(
+                        mangaId: manga.id,
+                        chapterId: chapter.id,
+                        mangaTitle: manga.title,
+                        chapterName: chapter.name,
+                        mangaThumbnailUrl: manga.thumbnailUrl,
+                      );
+                },
+                child: Icon(
+                  Icons.file_download_outlined,
+                  color: context.iconColor?.withOpacity(0.7),
+                  size: 20,
+                ),
+              ),
+            );
+          case ChapterDownloadStatus.queued:
+            return Tooltip(
+              message: 'Queued for download',
+              child: Icon(
+                Icons.schedule,
+                color: Colors.orange,
+                size: 20,
+              ),
+            );
+          case ChapterDownloadStatus.downloading:
+            return Tooltip(
+              message: 'Downloading...',
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.blue,
+                ),
+              ),
+            );
+          case ChapterDownloadStatus.partiallyCorrupted:
+            return Tooltip(
+              message: 'Some pages corrupted - tap to repair',
+              child: GestureDetector(
+                onTap: () => ref
+                    .read(localDownloadQueueProvider.notifier)
+                    .enqueueChapter(
+                      mangaId: manga.id,
+                      chapterId: chapter.id,
+                      mangaTitle: manga.title,
+                      chapterName: chapter.name,
+                      mangaThumbnailUrl: manga.thumbnailUrl,
+                    ),
+                child: Icon(
+                  Icons.warning,
+                  color: Colors.orange,
+                  size: 20,
+                ),
+              ),
+            );
+          case ChapterDownloadStatus.fullyCorrupted:
+            return Tooltip(
+              message: 'Chapter corrupted - tap to re-download',
+              child: GestureDetector(
+                onTap: () => ref
+                    .read(localDownloadQueueProvider.notifier)
+                    .enqueueChapter(
+                      mangaId: manga.id,
+                      chapterId: chapter.id,
+                      mangaTitle: manga.title,
+                      chapterName: chapter.name,
+                      mangaThumbnailUrl: manga.thumbnailUrl,
+                    ),
+                child: Icon(
+                  Icons.error,
+                  color: Colors.red,
+                  size: 20,
+                ),
+              ),
+            );
+          case ChapterDownloadStatus.repairNeeded:
+            return Tooltip(
+              message: 'Queued for repair',
+              child: Icon(
+                Icons.build,
+                color: Colors.orange,
+                size: 20,
+              ),
+            );
+          case ChapterDownloadStatus.repairing:
+            return Tooltip(
+              message: 'Repairing...',
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.orange,
+                ),
+              ),
+            );
+          case ChapterDownloadStatus.error:
+            return Tooltip(
+              message: 'Download failed - tap to retry',
+              child: GestureDetector(
+                onTap: () => ref
+                    .read(localDownloadQueueProvider.notifier)
+                    .enqueueChapter(
+                      mangaId: manga.id,
+                      chapterId: chapter.id,
+                      mangaTitle: manga.title,
+                      chapterName: chapter.name,
+                      mangaThumbnailUrl: manga.thumbnailUrl,
+                    ),
+                child: Icon(
+                  Icons.warning_outlined,
+                  color: Colors.orange,
+                  size: 20,
+                ),
+              ),
+            );
+        }
+      },
+      loading: () => SizedBox(
+        width: 20,
+        height: 20,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      ),
+      error: (_, __) => Icon(
+        Icons.error_outline,
+        color: Colors.red,
+        size: 20,
+      ),
+    );
+  }
+}
+
+/// Widget to show server download status (optional)
+class _ServerDownloadIcon extends StatelessWidget {
+  const _ServerDownloadIcon({
+    required this.chapter,
+    required this.mangaId,
+    required this.updateData,
+  });
+
+  final ChapterDto chapter;
+  final int mangaId;
+  final AsyncCallback updateData;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: chapter.isDownloaded.ifNull() 
+          ? 'Downloaded on server' 
+          : 'Download to server',
+      child: DownloadStatusIcon(
+        updateData: updateData,
+        chapter: chapter,
+        mangaId: mangaId,
+        isDownloaded: chapter.isDownloaded.ifNull(),
       ),
     );
   }

@@ -32,36 +32,17 @@ extension AsyncValueExtensions<T> on AsyncValue<T> {
   T? valueOrToast(Toast? toast, {bool withMicrotask = false}) =>
       (this..showToastOnError(toast, withMicrotask: withMicrotask)).valueOrNull;
 
-  Widget showUiWhenData(
+  U showUiWhenData<U extends Widget>(
     BuildContext context,
-    Widget Function(T data) data, {
-    VoidCallback? refresh,
-    Widget Function(Widget)? wrapper,
-    bool showGenericError = false,
-    bool addScaffoldWrapper = false,
-  }) {
-    if (addScaffoldWrapper) {
-      wrapper = (body) => Scaffold(appBar: AppBar(), body: body);
-    }
-    return when(
-      data: data,
-      skipError: true,
-      error: (error, trace) => AppUtils.wrapOn(
-          wrapper,
-          Emoticons(
-            title: showGenericError
-                ? context.l10n.errorSomethingWentWrong
-                : error.toString(),
-            button: refresh != null
-                ? TextButton(
-                    onPressed: refresh,
-                    child: Text(context.l10n.refresh),
-                  )
-                : null,
-          )),
-      loading: () =>
-          AppUtils.wrapOn(wrapper, const CenterSorayomiShimmerIndicator()),
-    );
+    U Function(T data) data,
+  ) {
+    return switch (this) {
+      AsyncData(:final value) => data(value),
+      AsyncError(:final error) => Emoticons(
+          title: error.toString(),
+        ) as U,
+      _ => const CenterSorayomiShimmerIndicator() as U,
+    };
   }
 
   AsyncValue<U> copyWithData<U>(U Function(T) data) => when(

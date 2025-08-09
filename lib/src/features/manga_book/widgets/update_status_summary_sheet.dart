@@ -62,7 +62,6 @@ class UpdateStatusSummaryDialog extends ConsumerWidget {
             ],
           ),
         ),
-        refresh: () => ref.invalidate(updateSummaryProvider),
       ),
     );
   }

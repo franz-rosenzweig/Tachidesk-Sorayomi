@@ -25,6 +25,7 @@ import '../../domain/chapter/chapter_model.dart';
 import '../../widgets/chapter_actions/multi_chapters_actions_bottom_app_bar.dart';
 import 'controller/manga_details_controller.dart';
 import 'widgets/big_screen_manga_details.dart';
+import 'widgets/download_queue_chip.dart';
 import 'widgets/edit_manga_category_dialog.dart';
 import 'widgets/manga_chapter_organizer.dart';
 import 'widgets/small_screen_manga_details.dart';
@@ -150,6 +151,11 @@ class MangaDetailsScreen extends HookConsumerWidget {
               : AppBar(
                   title: Text(data?.title ?? context.l10n.manga),
                   actions: [
+                    // Download queue status chip
+                    const Padding(
+                      padding: EdgeInsets.only(right: 8.0),
+                      child: DownloadQueueChip(),
+                    ),
                     if (context.isTablet) ...[
                       IconButton(
                         onPressed: () => refresh(true),
@@ -257,6 +263,7 @@ class MangaDetailsScreen extends HookConsumerWidget {
                   afterOptionSelected: chapterListRefresh,
                   selectedChapters: selectedChapters,
                   chapterList: filteredChapterList.value,
+                  manga: data,
                 )
               : null,
           floatingActionButton:
@@ -305,13 +312,6 @@ class MangaDetailsScreen extends HookConsumerWidget {
                     child: Text(context.l10n.refresh),
                   ),
                 ),
-        ),
-        refresh: refresh,
-        wrapper: (body) => Scaffold(
-          appBar: AppBar(
-            title: Text(context.l10n.manga),
-          ),
-          body: body,
         ),
       ),
     );

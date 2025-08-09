@@ -150,14 +150,6 @@ class LibraryScreen extends HookConsumerWidget {
           );
         }
       },
-      refresh: () => ref.refresh(categoryControllerProvider.future),
-      wrapper: (body) => Scaffold(
-        appBar: AppBar(
-          title: Text(context.l10n.library),
-          centerTitle: true,
-        ),
-        body: body,
-      ),
     );
   }
 }

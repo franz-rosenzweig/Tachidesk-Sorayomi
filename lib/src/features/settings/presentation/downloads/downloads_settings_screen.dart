@@ -26,14 +26,11 @@ class DownloadsSettingsScreen extends ConsumerWidget {
         appBar: AppBar(title: Text(context.l10n.downloads)),
         body: RefreshIndicator(
           onRefresh: () => ref.refresh(settingsProvider.future),
-          child: serverSettings.showUiWhenData(
-            context,
-            (data) {
+          child: serverSettings.when(
+            data: (data) {
               final DownloadsSettingsDto? downloadsSettingsDto = data;
               if (downloadsSettingsDto == null) {
-                return Emoticons(
-                  title: context.l10n.noPropFound(context.l10n.settings),
-                );
+                return _buildOfflineView(context);
               }
               return ListView(
                 children: [
@@ -101,9 +98,60 @@ class DownloadsSettingsScreen extends ConsumerWidget {
                 ],
               );
             },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, stack) => _buildOfflineView(context),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildOfflineView(BuildContext context) {
+    return ListView(
+      children: [
+        SectionTitle(title: "Local Downloads"),
+        ListTile(
+          title: Text("Local Downloads Settings"),
+          subtitle: Text("Configure on-device downloads storage"),
+          trailing: Icon(Icons.arrow_forward_ios),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => const LocalDownloadsSettingsScreen(),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 20),
+        Card(
+          margin: const EdgeInsets.all(16),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                Icon(
+                  Icons.cloud_off,
+                  size: 48,
+                  color: Colors.grey,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  "Server Offline",
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "Server downloads settings are not available while offline. Local downloads settings are still accessible above.",
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

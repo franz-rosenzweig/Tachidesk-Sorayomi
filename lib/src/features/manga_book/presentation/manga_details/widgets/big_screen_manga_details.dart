@@ -73,12 +73,12 @@ class BigScreenMangaDetails extends ConsumerWidget {
                         child: ListView.builder(
                           physics: const AlwaysScrollableScrollPhysics(),
                           itemBuilder: (context, index) {
-                            if (filteredChapterList.length == index) {
+                            if (filteredChapterList!.length == index) {
                               return const ListTile();
                             }
                             final key =
-                                ValueKey("${filteredChapterList[index].id}");
-                            final chapter = filteredChapterList[index];
+                                ValueKey("${filteredChapterList![index].id}");
+                            final chapter = filteredChapterList![index];
                             return ChapterListTile(
                               key: key,
                               manga: manga,
@@ -109,7 +109,6 @@ class BigScreenMangaDetails extends ConsumerWidget {
                   );
                 }
               },
-              refresh: () => onRefresh(false),
             ),
           ),
         ],

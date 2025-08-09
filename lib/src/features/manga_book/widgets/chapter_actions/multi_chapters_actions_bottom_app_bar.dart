@@ -13,9 +13,11 @@ import '../../../../constants/gen/assets.gen.dart';
 import '../../../../utils/extensions/custom_extensions.dart';
 import '../../../../utils/misc/toast/toast.dart';
 import '../../data/downloads/downloads_repository.dart';
+import '../../data/local_downloads/local_download_queue.dart';
 import '../../data/manga_book/manga_book_repository.dart';
 import '../../domain/chapter/chapter_model.dart';
 import '../../domain/chapter_batch/chapter_batch_model.dart';
+import '../../domain/manga/manga_model.dart';
 import 'multi_chapters_action_icon.dart';
 
 class MultiChaptersActionsBottomAppBar extends HookConsumerWidget {
@@ -24,11 +26,13 @@ class MultiChaptersActionsBottomAppBar extends HookConsumerWidget {
     required this.selectedChapters,
     required this.afterOptionSelected,
     this.chapterList,
+    this.manga,
   });
 
   final ValueNotifier<Map<int, ChapterDto>> selectedChapters;
   final AsyncCallback afterOptionSelected;
   final List<ChapterDto>? chapterList;
+  final MangaDto? manga;
 
   List<int> get selectedChapterList => selectedChapters.value.keys.toList();
   ChapterDto get firstChapter =>
@@ -91,7 +95,8 @@ class MultiChaptersActionsBottomAppBar extends HookConsumerWidget {
             ),
           if (selectedList.any((e) => !(e.isDownloaded.ifNull())))
             IconButton(
-              icon: Icon(Icons.download_rounded),
+              icon: Icon(Icons.cloud_download_rounded),
+              tooltip: 'Download to Server',
               onPressed: () async {
                 final result = await AsyncValue.guard(
                   () => ref
@@ -104,6 +109,45 @@ class MultiChaptersActionsBottomAppBar extends HookConsumerWidget {
                 if (context.mounted) {
                   result.showToastOnError(ref.read(toastProvider));
                 }
+                await refresh(true);
+              },
+            ),
+          // Local device download button
+          if (manga != null && selectedList.any((e) => !(e.isDownloaded.ifNull())))
+            IconButton(
+              icon: Icon(Icons.phone_android_rounded),
+              tooltip: 'Download to Device',
+              onPressed: () async {
+                final downloadQueue = ref.read(localDownloadQueueProvider.notifier);
+                
+                try {
+                  for (var chapter in selectedList) {
+                    if (!(chapter.isDownloaded.ifNull(true))) {
+                      await downloadQueue.enqueueChapter(
+                        mangaId: manga!.id,
+                        chapterId: chapter.id,
+                        mangaTitle: manga!.title,
+                        chapterName: chapter.name,
+                        mangaThumbnailUrl: manga!.thumbnailUrl,
+                      );
+                    }
+                  }
+                  
+                  if (context.mounted) {
+                    final chaptersToDownload = selectedList
+                        .where((e) => !(e.isDownloaded.ifNull(true)))
+                        .length;
+                    
+                    ref.read(toastProvider)?.show(
+                      'Added $chaptersToDownload chapters to local download queue'
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ref.read(toastProvider)?.show('Failed to queue chapters: $e');
+                  }
+                }
+                
                 await refresh(true);
               },
             ),

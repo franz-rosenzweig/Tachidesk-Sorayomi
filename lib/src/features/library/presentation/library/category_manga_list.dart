@@ -127,7 +127,6 @@ class CategoryMangaList extends HookConsumerWidget {
           child: mangaList,
         );
       },
-      refresh: refresh,
     );
   }
 }

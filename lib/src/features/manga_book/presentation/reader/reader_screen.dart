@@ -18,11 +18,17 @@ import '../../../settings/presentation/reader/widgets/reader_ignore_safe_area_ti
 import '../../../settings/presentation/reader/widgets/reader_mode_tile/reader_mode_tile.dart';
 import '../../data/manga_book/manga_book_repository.dart';
 import '../../domain/chapter_batch/chapter_batch_model.dart';
+import '../../domain/chapter/chapter_model.dart';
+import '../../domain/chapter_page/chapter_page_model.dart';
 import '../../domain/manga/manga_model.dart';
 import '../manga_details/controller/manga_details_controller.dart';
 import 'controller/reader_controller.dart';
 import 'widgets/reader_mode/continuous_reader_mode.dart';
 import 'widgets/reader_mode/single_page_reader_mode.dart';
+import 'widgets/reader_mode/enhanced_single_page_reader_mode.dart';
+import 'widgets/reader_mode/enhanced_continuous_reader_mode.dart';
+import 'widgets/reader_mode/enhanced_webtoon_reader_mode.dart';
+import '../../../settings/presentation/reader/widgets/enhanced_reader_tile/enhanced_reader_tile.dart';
 
 class ReaderScreen extends HookConsumerWidget {
   const ReaderScreen({
@@ -38,7 +44,8 @@ class ReaderScreen extends HookConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final mangaProvider = mangaWithIdProvider(mangaId: mangaId);
     final chapterProviderWithIndex = chapterProvider(chapterId: chapterId);
-    final chapterPages = ref.watch(chapterPagesProvider(chapterId: chapterId));
+    // Use unified provider instead of direct network provider
+    final chapterPagesUnified = ref.watch(chapterPagesUnifiedProvider(mangaId, chapterId));
     final manga = ref.watch(mangaProvider);
     final chapter = ref.watch(chapterProviderWithIndex);
     final defaultReaderMode = ref.watch(readerModeKeyProvider);
@@ -48,7 +55,7 @@ class ReaderScreen extends HookConsumerWidget {
 
     final updateLastRead = useCallback((int currentPage) async {
       final chapterValue = chapter.valueOrNull;
-      final chapterPagesValue = chapterPages.valueOrNull;
+      final chapterPagesValue = chapterPagesUnified.valueOrNull;
       if (chapterValue == null || chapterPagesValue == null) return;
 
       // Use the actual loaded pages count, not the chapter's pageCount metadata
@@ -70,12 +77,12 @@ class ReaderScreen extends HookConsumerWidget {
 
       // Invalidate history to refresh the reading progress
       ref.invalidate(readingHistoryProvider);
-    }, [chapter.valueOrNull, chapterPages.valueOrNull]);
+    }, [chapter.valueOrNull, chapterPagesUnified.valueOrNull]);
 
     final onPageChanged = useCallback<AsyncValueSetter<int>>(
       (int index) async {
         final chapterValue = chapter.valueOrNull;
-        final chapterPagesValue = chapterPages.valueOrNull;
+        final chapterPagesValue = chapterPagesUnified.valueOrNull;
         if (chapterValue == null || chapterPagesValue == null) return;
 
         // Skip if chapter is already read or if we're going backwards
@@ -102,7 +109,7 @@ class ReaderScreen extends HookConsumerWidget {
         }
         return;
       },
-      [chapter, chapterPages],
+      [chapter, chapterPagesUnified],
     );
 
     useEffect(() {
@@ -135,157 +142,180 @@ class ReaderScreen extends HookConsumerWidget {
                 context,
                 (chapterData) {
                   if (chapterData == null) return const SizedBox.shrink();
-                  return chapterPages.showUiWhenData(
-                    context,
-                    (chapterPagesData) {
-                      if (chapterPagesData == null) {
-                        return const SizedBox.shrink();
+                  return chapterPagesUnified.when(
+                    data: (chapterPagesResult) {
+                      // Convert unified result to compatible ChapterPagesDto
+                      final chapterPagesData = chapterPagesResult.toChapterPagesDto(chapterData.id ?? 0);
+                      final isLocal = chapterPagesResult.isLocal;
+                      
+                      if (kDebugMode) {
+                        print('ReaderScreen: Using ${isLocal ? 'local' : 'network'} pages for chapter ${chapterData.id}');
                       }
-                      return switch (
-                          data.metaData.readerMode ?? defaultReaderMode) {
-                        ReaderMode.singleVertical => SinglePageReaderMode(
-                            chapter: chapterData,
-                            manga: data,
-                            onPageChanged: onPageChanged,
-                            scrollDirection: Axis.vertical,
-                            showReaderLayoutAnimation:
-                                showReaderLayoutAnimation,
-                            chapterPages: chapterPagesData,
+                      
+                      // Check if enhanced reader mode is enabled
+                      final enhancedReaderEnabled = ref.watch(enhancedReaderKeyProvider).ifNull(false);
+                      
+                      return _buildReaderWidget(
+                        readerMode: data.metaData.readerMode ?? defaultReaderMode,
+                        defaultReaderMode: defaultReaderMode,
+                        chapterData: chapterData,
+                        data: data,
+                        onPageChanged: onPageChanged,
+                        showReaderLayoutAnimation: showReaderLayoutAnimation,
+                        chapterPagesData: chapterPagesData,
+                        enhancedReaderEnabled: enhancedReaderEnabled,
+                      );
+                    },
+                    loading: () => const Scaffold(
+                      body: Center(child: CircularProgressIndicator()),
+                    ),
+                    error: (error, stack) {
+                      if (error is OfflineNotAvailableException) {
+                        return Scaffold(
+                          appBar: AppBar(title: Text('Chapter ${chapterData.name ?? chapterData.id}')),
+                          body: Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.wifi_off, size: 64, color: Colors.grey),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  'Chapter not downloaded',
+                                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 8),
+                                const Text(
+                                  'This chapter is not available offline.\nConnect to internet or download it first.',
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 16),
+                                ElevatedButton(
+                                  onPressed: () => ref.refresh(chapterPagesUnifiedProvider(mangaId, chapterId)),
+                                  child: const Text('Retry'),
+                                ),
+                              ],
+                            ),
                           ),
-                        ReaderMode.singleHorizontalRTL => SinglePageReaderMode(
-                            chapter: chapterData,
-                            manga: data,
-                            onPageChanged: onPageChanged,
-                            reverse: true,
-                            showReaderLayoutAnimation:
-                                showReaderLayoutAnimation,
-                            chapterPages: chapterPagesData,
-                          ),
-                        ReaderMode.continuousHorizontalLTR =>
-                          ContinuousReaderMode(
-                            chapter: chapterData,
-                            manga: data,
-                            onPageChanged: onPageChanged,
-                            scrollDirection: Axis.horizontal,
-                            showReaderLayoutAnimation:
-                                showReaderLayoutAnimation,
-                            chapterPages: chapterPagesData,
-                          ),
-                        ReaderMode.continuousHorizontalRTL =>
-                          ContinuousReaderMode(
-                            chapter: chapterData,
-                            manga: data,
-                            onPageChanged: onPageChanged,
-                            scrollDirection: Axis.horizontal,
-                            reverse: true,
-                            showReaderLayoutAnimation:
-                                showReaderLayoutAnimation,
-                            chapterPages: chapterPagesData,
-                          ),
-                        ReaderMode.singleHorizontalLTR => SinglePageReaderMode(
-                            chapter: chapterData,
-                            manga: data,
-                            onPageChanged: onPageChanged,
-                            chapterPages: chapterPagesData,
-                          ),
-                        ReaderMode.continuousVertical => ContinuousReaderMode(
-                            chapter: chapterData,
-                            manga: data,
-                            onPageChanged: onPageChanged,
-                            showSeparator: true,
-                            showReaderLayoutAnimation:
-                                showReaderLayoutAnimation,
-                            chapterPages: chapterPagesData,
-                          ),
-                        ReaderMode.webtoon => ContinuousReaderMode(
-                            chapter: chapterData,
-                            manga: data,
-                            onPageChanged: onPageChanged,
-                            showReaderLayoutAnimation:
-                                showReaderLayoutAnimation,
-                            chapterPages: chapterPagesData,
-                          ),
-                        ReaderMode.defaultReader || null => switch (
-                              defaultReaderMode ?? ReaderMode.webtoon) {
-                            ReaderMode.singleHorizontalLTR =>
-                              SinglePageReaderMode(
-                                chapter: chapterData,
-                                manga: data,
-                                onPageChanged: onPageChanged,
-                                chapterPages: chapterPagesData,
-                              ),
-                            ReaderMode.singleHorizontalRTL =>
-                              SinglePageReaderMode(
-                                chapter: chapterData,
-                                manga: data,
-                                onPageChanged: onPageChanged,
-                                reverse: true,
-                                showReaderLayoutAnimation:
-                                    showReaderLayoutAnimation,
-                                chapterPages: chapterPagesData,
-                              ),
-                            ReaderMode.singleVertical => SinglePageReaderMode(
-                                chapter: chapterData,
-                                manga: data,
-                                onPageChanged: onPageChanged,
-                                scrollDirection: Axis.vertical,
-                                showReaderLayoutAnimation:
-                                    showReaderLayoutAnimation,
-                                chapterPages: chapterPagesData,
-                              ),
-                            ReaderMode.continuousHorizontalLTR =>
-                              ContinuousReaderMode(
-                                chapter: chapterData,
-                                manga: data,
-                                onPageChanged: onPageChanged,
-                                scrollDirection: Axis.horizontal,
-                                showReaderLayoutAnimation:
-                                    showReaderLayoutAnimation,
-                                chapterPages: chapterPagesData,
-                              ),
-                            ReaderMode.continuousHorizontalRTL =>
-                              ContinuousReaderMode(
-                                chapter: chapterData,
-                                manga: data,
-                                onPageChanged: onPageChanged,
-                                scrollDirection: Axis.horizontal,
-                                reverse: true,
-                                showReaderLayoutAnimation:
-                                    showReaderLayoutAnimation,
-                                chapterPages: chapterPagesData,
-                              ),
-                            ReaderMode.continuousVertical =>
-                              ContinuousReaderMode(
-                                chapter: chapterData,
-                                manga: data,
-                                onPageChanged: onPageChanged,
-                                showSeparator: true,
-                                showReaderLayoutAnimation:
-                                    showReaderLayoutAnimation,
-                                chapterPages: chapterPagesData,
-                              ),
-                            ReaderMode.webtoon || _ => ContinuousReaderMode(
-                                chapter: chapterData,
-                                manga: data,
-                                onPageChanged: onPageChanged,
-                                showReaderLayoutAnimation:
-                                    showReaderLayoutAnimation,
-                                chapterPages: chapterPagesData,
-                              ),
-                          }
-                      };
+                        );
+                      }
+                      return Scaffold(
+                        appBar: AppBar(title: const Text('Error')),
+                        body: Center(child: Text('Error: $error')),
+                      );
                     },
                   );
                 },
-                refresh: () => ref.refresh(chapterProviderWithIndex.future),
-                addScaffoldWrapper: true,
               );
             },
-            addScaffoldWrapper: true,
-            refresh: () => ref.refresh(mangaProvider.future),
           ),
         ),
       ),
     );
+  }
+
+  /// Build the appropriate reader widget based on mode and settings
+  Widget _buildReaderWidget({
+    required ReaderMode? readerMode,
+    required ReaderMode? defaultReaderMode,
+    required ChapterDto chapterData,
+    required MangaDto data,
+    required ValueSetter<int>? onPageChanged,
+    required bool showReaderLayoutAnimation,
+    required ChapterPagesDto chapterPagesData,
+    required bool enhancedReaderEnabled,
+  }) {
+    final actualReaderMode = readerMode ?? defaultReaderMode ?? ReaderMode.webtoon;
+
+    // Helper to choose between standard and enhanced widgets
+    Widget buildSinglePageReader({
+      Axis scrollDirection = Axis.horizontal,
+      bool reverse = false,
+    }) {
+      if (enhancedReaderEnabled) {
+        return EnhancedSinglePageReaderMode(
+          chapter: chapterData,
+          manga: data,
+          onPageChanged: onPageChanged,
+          scrollDirection: scrollDirection,
+          reverse: reverse,
+          showReaderLayoutAnimation: showReaderLayoutAnimation,
+          chapterPages: chapterPagesData,
+        );
+      } else {
+        return SinglePageReaderMode(
+          chapter: chapterData,
+          manga: data,
+          onPageChanged: onPageChanged,
+          scrollDirection: scrollDirection,
+          reverse: reverse,
+          showReaderLayoutAnimation: showReaderLayoutAnimation,
+          chapterPages: chapterPagesData,
+        );
+      }
+    }
+
+    Widget buildContinuousReader({
+      Axis scrollDirection = Axis.vertical,
+      bool reverse = false,
+      bool showSeparator = false,
+    }) {
+      if (enhancedReaderEnabled) {
+        return EnhancedContinuousReaderMode(
+          chapter: chapterData,
+          manga: data,
+          onPageChanged: onPageChanged,
+          scrollDirection: scrollDirection,
+          reverse: reverse,
+          showSeparator: showSeparator,
+          showReaderLayoutAnimation: showReaderLayoutAnimation,
+          chapterPages: chapterPagesData,
+        );
+      } else {
+        return ContinuousReaderMode(
+          chapter: chapterData,
+          manga: data,
+          onPageChanged: onPageChanged,
+          scrollDirection: scrollDirection,
+          reverse: reverse,
+          showSeparator: showSeparator,
+          showReaderLayoutAnimation: showReaderLayoutAnimation,
+          chapterPages: chapterPagesData,
+        );
+      }
+    }
+
+    Widget buildWebtoonReader() {
+      if (enhancedReaderEnabled) {
+        return EnhancedWebtoonReaderMode(
+          chapter: chapterData,
+          manga: data,
+          onPageChanged: onPageChanged,
+          showReaderLayoutAnimation: showReaderLayoutAnimation,
+          chapterPages: chapterPagesData,
+        );
+      } else {
+        return ContinuousReaderMode(
+          chapter: chapterData,
+          manga: data,
+          onPageChanged: onPageChanged,
+          showReaderLayoutAnimation: showReaderLayoutAnimation,
+          chapterPages: chapterPagesData,
+        );
+      }
+    }
+
+    return switch (actualReaderMode) {
+      ReaderMode.singleVertical => buildSinglePageReader(scrollDirection: Axis.vertical),
+      ReaderMode.singleHorizontalLTR => buildSinglePageReader(),
+      ReaderMode.singleHorizontalRTL => buildSinglePageReader(reverse: true),
+      ReaderMode.continuousVertical => buildContinuousReader(showSeparator: true),
+      ReaderMode.continuousHorizontalLTR => buildContinuousReader(scrollDirection: Axis.horizontal),
+      ReaderMode.continuousHorizontalRTL => buildContinuousReader(
+        scrollDirection: Axis.horizontal,
+        reverse: true,
+      ),
+      ReaderMode.webtoon => buildWebtoonReader(),
+      ReaderMode.defaultReader => buildWebtoonReader(), // Default to webtoon
+    };
   }
 }

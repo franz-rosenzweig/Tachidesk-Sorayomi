@@ -11,6 +11,8 @@ dependencies:
   built_collection: ^5.1.1
   cached_network_image: ^3.2.2
   cached_network_image_platform_interface: ^4.0.0
+  connectivity_plus: ^6.0.0
+  crypto: ^3.0.3
   cupertino_icons: ^1.0.5
   extension_type_unions: ^1.0.10
   file_picker: ^8.0.0+1

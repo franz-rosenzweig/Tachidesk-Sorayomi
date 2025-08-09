@@ -86,7 +86,6 @@ class DownloadsScreen extends ConsumerWidget {
                   );
                 }
               },
-              showGenericError: true,
             ),
             const LocalDownloadsScreen(),
           ],

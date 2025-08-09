@@ -122,7 +122,6 @@ class ExtensionScreen extends HookConsumerWidget {
                 ],
               ),
             ),
-      refresh: refresh,
     );
   }
 }
