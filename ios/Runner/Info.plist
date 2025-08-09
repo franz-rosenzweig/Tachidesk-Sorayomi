@@ -72,5 +72,10 @@
 			<string>vi</string>
 			<string>fil</string>
 		</array>
+		<!-- Enable Files app access to app documents -->
+		<key>UIFileSharingEnabled</key>
+		<true/>
+		<key>LSSupportsOpeningDocumentsInPlace</key>
+		<true/>
 	</dict>
 </plist>

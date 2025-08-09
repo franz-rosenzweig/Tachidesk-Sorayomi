@@ -9,290 +9,190 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:disk_space_plus/disk_space_plus.dart';
 
 import 'local_downloads_settings_repository.dart';
+
+/// Central logging helper for storage related messages
+void _storageLog(String message) {
+  // ignore: avoid_print
+  print('[StoragePathResolver] ' + message);
+}
 
 /// Comprehensive storage path resolver with fallback chain and iOS sandboxing support
 class StoragePathResolver {
   final LocalDownloadsSettingsRepository _settingsRepo;
-  
+
   const StoragePathResolver(this._settingsRepo);
-  
-  /// Get the best available downloads directory with fallback chain
+
+  /// Convenience helper for tests with an in-memory stub
+  factory StoragePathResolver.test() {
+    return StoragePathResolver(_InMemorySettingsRepo());
+  }
+
+  /// Resolve the optimal downloads path with ordered fallbacks.
   Future<StoragePathResult> resolveDownloadsPath() async {
-    final pathAttempts = <StoragePathAttempt>[];
-    
+    final attempts = <StoragePathAttempt>[];
+
+    Future<StoragePathResult> successResult(_PathAttemptResult r) async {
+      return StoragePathResult(
+        directory: r.directory!,
+        pathType: r.attempt.type,
+        attempts: attempts,
+        isTemporary: r.attempt.type == PathType.temporary,
+      );
+    }
+
     try {
-      // 1. Try user-configured custom path first
+      // 1. Custom path
       final customPath = await _settingsRepo.getLocalDownloadsPath();
       if (customPath != null && customPath.isNotEmpty) {
-        final customResult = await _tryPath(
-          customPath, 
-          PathType.custom, 
-          'User-configured custom path'
-        );
-        pathAttempts.add(customResult.attempt);
-        
-        if (customResult.success) {
-          return StoragePathResult(
-            directory: customResult.directory!,
-            pathType: PathType.custom,
-            attempts: pathAttempts,
-          );
-        }
+        final r = await _tryPath(customPath, PathType.custom, 'User-configured custom path');
+        attempts.add(r.attempt);
+        if (r.success) return successResult(r);
       }
-      
-      // 2. Try application documents directory (iOS-safe)
-      final documentsResult = await _tryDocumentsDirectory();
-      pathAttempts.add(documentsResult.attempt);
-      
-      if (documentsResult.success) {
-        return StoragePathResult(
-          directory: documentsResult.directory!,
-          pathType: PathType.documents,
-          attempts: pathAttempts,
-        );
-      }
-      
-      // 3. Try external storage directory (Android)
+
+      // 2. Application Support
+      final support = await _tryApplicationSupportDirectory();
+      attempts.add(support.attempt);
+      if (support.success) return successResult(support);
+
+      // 3. Documents
+      final docs = await _tryDocumentsDirectory();
+      attempts.add(docs.attempt);
+      if (docs.success) return successResult(docs);
+
+      // 4. External (Android only)
       if (Platform.isAndroid) {
-        final externalResult = await _tryExternalStorageDirectory();
-        pathAttempts.add(externalResult.attempt);
-        
-        if (externalResult.success) {
-          return StoragePathResult(
-            directory: externalResult.directory!,
-            pathType: PathType.external,
-            attempts: pathAttempts,
-          );
-        }
+        final ext = await _tryExternalStorageDirectory();
+        attempts.add(ext.attempt);
+        if (ext.success) return successResult(ext);
       }
-      
-      // 4. Fallback to downloads directory
-      final downloadsResult = await _tryDownloadsDirectory();
-      pathAttempts.add(downloadsResult.attempt);
-      
-      if (downloadsResult.success) {
-        return StoragePathResult(
-          directory: downloadsResult.directory!,
-          pathType: PathType.downloads,
-          attempts: pathAttempts,
-        );
-      }
-      
-      // 5. Final fallback to temporary directory
-      final tempResult = await _tryTemporaryDirectory();
-      pathAttempts.add(tempResult.attempt);
-      
-      if (tempResult.success) {
-        return StoragePathResult(
-          directory: tempResult.directory!,
-          pathType: PathType.temporary,
-          attempts: pathAttempts,
-          isTemporary: true,
-        );
-      }
-      
-      // If all paths fail, throw with detailed information
-      throw StoragePathException(
-        'All storage path options failed',
-        attempts: pathAttempts,
-      );
-      
+
+      // 5. Downloads folder (desktop/mobile platforms that support it)
+      final dl = await _tryDownloadsDirectory();
+      attempts.add(dl.attempt);
+      if (dl.success) return successResult(dl);
+
+      // 6. Temporary (last resort)
+      final tmp = await _tryTemporaryDirectory();
+      attempts.add(tmp.attempt);
+      if (tmp.success) return successResult(tmp);
+
+      throw StoragePathException('All storage path options failed', attempts: attempts);
     } catch (e) {
-      if (e is StoragePathException) {
-        rethrow;
-      }
-      
-      throw StoragePathException(
-        'Unexpected error resolving storage path: $e',
-        attempts: pathAttempts,
-        originalError: e,
-      );
+      if (e is StoragePathException) rethrow;
+      throw StoragePathException('Unexpected error resolving storage path: $e', attempts: attempts, originalError: e);
     }
   }
   
-  /// Try application documents directory (most reliable on iOS)
+  /// Application Support (preferred persistent sandbox)
+  Future<_PathAttemptResult> _tryApplicationSupportDirectory() async {
+    try {
+      final base = await getApplicationSupportDirectory();
+      final dir = Directory(p.join(base.path, 'sorayomi_downloads'));
+      return await _tryPath(dir.path, PathType.applicationSupport, 'Application support directory');
+    } catch (e) {
+      return _failedAttempt(PathType.applicationSupport, 'Application support directory', e);
+    }
+  }
+
+  /// Documents (secondary sandbox)
   Future<_PathAttemptResult> _tryDocumentsDirectory() async {
     try {
-      final docs = await getApplicationDocumentsDirectory();
-      final downloadsDir = Directory(p.join(docs.path, 'sorayomi_downloads'));
-      
-      return await _tryPath(
-        downloadsDir.path,
-        PathType.documents,
-        'Application documents directory',
-      );
+      final base = await getApplicationDocumentsDirectory();
+      final dir = Directory(p.join(base.path, 'sorayomi_downloads'));
+      return await _tryPath(dir.path, PathType.documents, 'Application documents directory');
     } catch (e) {
-      return _PathAttemptResult(
-        attempt: StoragePathAttempt(
-          path: 'Unknown',
-          type: PathType.documents,
-          description: 'Application documents directory',
-          success: false,
-          error: e.toString(),
-        ),
-        success: false,
-      );
+      return _failedAttempt(PathType.documents, 'Application documents directory', e);
     }
   }
   
-  /// Try external storage directory (Android)
+  /// External (Android only)
   Future<_PathAttemptResult> _tryExternalStorageDirectory() async {
     try {
-      final external = await getExternalStorageDirectory();
-      if (external == null) {
-        return _PathAttemptResult(
-          attempt: StoragePathAttempt(
-            path: 'null',
-            type: PathType.external,
-            description: 'External storage directory',
-            success: false,
-            error: 'External storage not available',
-          ),
-          success: false,
-        );
+      final base = await getExternalStorageDirectory();
+      if (base == null) {
+        return _failedAttempt(PathType.external, 'External storage directory', 'External storage not available');
       }
-      
-      final downloadsDir = Directory(p.join(external.path, 'sorayomi_downloads'));
-      
-      return await _tryPath(
-        downloadsDir.path,
-        PathType.external,
-        'External storage directory',
-      );
+      final dir = Directory(p.join(base.path, 'sorayomi_downloads'));
+      return await _tryPath(dir.path, PathType.external, 'External storage directory');
     } catch (e) {
-      return _PathAttemptResult(
-        attempt: StoragePathAttempt(
-          path: 'Unknown',
-          type: PathType.external,
-          description: 'External storage directory',
-          success: false,
-          error: e.toString(),
-        ),
-        success: false,
-      );
+      return _failedAttempt(PathType.external, 'External storage directory', e);
     }
   }
   
-  /// Try downloads directory
+  /// Downloads directory (platform support varies)
   Future<_PathAttemptResult> _tryDownloadsDirectory() async {
     try {
-      final downloads = await getDownloadsDirectory();
-      if (downloads == null) {
-        return _PathAttemptResult(
-          attempt: StoragePathAttempt(
-            path: 'null',
-            type: PathType.downloads,
-            description: 'Downloads directory',
-            success: false,
-            error: 'Downloads directory not available',
-          ),
-          success: false,
-        );
+      final base = await getDownloadsDirectory();
+      if (base == null) {
+        return _failedAttempt(PathType.downloads, 'Downloads directory', 'Downloads directory not available');
       }
-      
-      final downloadsDir = Directory(p.join(downloads.path, 'sorayomi_downloads'));
-      
-      return await _tryPath(
-        downloadsDir.path,
-        PathType.downloads,
-        'Downloads directory',
-      );
+      final dir = Directory(p.join(base.path, 'sorayomi_downloads'));
+      return await _tryPath(dir.path, PathType.downloads, 'Downloads directory');
     } catch (e) {
-      return _PathAttemptResult(
-        attempt: StoragePathAttempt(
-          path: 'Unknown',
-          type: PathType.downloads,
-          description: 'Downloads directory',
-          success: false,
-          error: e.toString(),
-        ),
-        success: false,
-      );
+      return _failedAttempt(PathType.downloads, 'Downloads directory', e);
     }
   }
   
-  /// Try temporary directory (last resort)
+  /// Temporary directory (last resort)
   Future<_PathAttemptResult> _tryTemporaryDirectory() async {
     try {
-      final temp = await getTemporaryDirectory();
-      final downloadsDir = Directory(p.join(temp.path, 'sorayomi_downloads'));
-      
-      return await _tryPath(
-        downloadsDir.path,
-        PathType.temporary,
-        'Temporary directory (WARNING: may be cleared)',
-      );
+      final base = await getTemporaryDirectory();
+      final dir = Directory(p.join(base.path, 'sorayomi_downloads'));
+      return await _tryPath(dir.path, PathType.temporary, 'Temporary directory (WARNING: may be cleared)');
     } catch (e) {
-      return _PathAttemptResult(
-        attempt: StoragePathAttempt(
-          path: 'Unknown',
-          type: PathType.temporary,
-          description: 'Temporary directory',
-          success: false,
-          error: e.toString(),
-        ),
-        success: false,
-      );
+      return _failedAttempt(PathType.temporary, 'Temporary directory', e);
     }
   }
   
-  /// Try to create and access a specific path
-  Future<_PathAttemptResult> _tryPath(
-    String path,
-    PathType type,
-    String description,
-  ) async {
+  /// Attempt a specific path (create, write test, read test)
+  Future<_PathAttemptResult> _tryPath(String path, PathType type, String description) async {
+    final dir = Directory(path);
     try {
-      final dir = Directory(path);
-      
-      // Test if we can create the directory
       if (!await dir.exists()) {
         await dir.create(recursive: true);
       }
-      
-      // Test write permissions by creating a test file
-      final testFile = File(p.join(dir.path, '.sorayomi_test_${DateTime.now().millisecondsSinceEpoch}'));
-      await testFile.writeAsString('test');
-      
-      // Test read permissions
-      await testFile.readAsString();
-      
-      // Clean up test file
-      await testFile.delete();
-      
-      if (kDebugMode) {
-        print('StoragePathResolver: Successfully validated path: $path');
-      }
-      
-      return _PathAttemptResult(
-        attempt: StoragePathAttempt(
-          path: path,
-          type: type,
-          description: description,
+      final writable = await _isWritable(dir);
+      if (writable) {
+        _storageLog('Validated path: $path');
+        return _PathAttemptResult(
+          attempt: StoragePathAttempt(path: path, type: type, description: description, success: true),
           success: true,
-        ),
-        success: true,
-        directory: dir,
-      );
-      
-    } catch (e) {
-      if (kDebugMode) {
-        print('StoragePathResolver: Failed to validate path $path: $e');
+          directory: dir,
+        );
       }
-      
-      return _PathAttemptResult(
-        attempt: StoragePathAttempt(
-          path: path,
-          type: type,
-          description: description,
-          success: false,
-          error: e.toString(),
-        ),
-        success: false,
-      );
+      return _failedAttempt(type, description, 'Directory not writable', path: path);
+    } catch (e) {
+      return _failedAttempt(type, description, e, path: path);
     }
+  }
+
+  /// Determine if directory is writable by creating and deleting a test file
+  Future<bool> _isWritable(Directory dir) async {
+    try {
+      final f = File(p.join(dir.path, '.sorayomi_write_test'));
+      await f.writeAsString(DateTime.now().toIso8601String());
+      await f.readAsString();
+      await f.delete();
+      return true;
+    } catch (e) {
+      _storageLog('Write test failed in ${dir.path}: $e');
+      return false;
+    }
+  }
+
+  _PathAttemptResult _failedAttempt(PathType type, String description, Object error, {String? path}) {
+    final attempt = StoragePathAttempt(
+      path: path ?? 'Unknown',
+      type: type,
+      description: description,
+      success: false,
+      error: error.toString(),
+    );
+    _storageLog('Attempt FAILED type=$type path=${attempt.path} error=${attempt.error}');
+    return _PathAttemptResult(attempt: attempt, success: false);
   }
   
   /// Get storage usage for a directory
@@ -308,6 +208,8 @@ class StoragePathResolver {
           totalSize: 0,
           totalFiles: 0,
           totalChapters: 0,
+          freeSpace: await _tryGetFreeSpace(),
+          totalSpace: await _tryGetTotalSpace(),
         );
       }
       
@@ -337,6 +239,8 @@ class StoragePathResolver {
         totalSize: totalSize,
         totalFiles: totalFiles,
         totalChapters: totalChapters,
+        freeSpace: await _tryGetFreeSpace(),
+        totalSpace: await _tryGetTotalSpace(),
       );
       
     } catch (e) {
@@ -348,10 +252,48 @@ class StoragePathResolver {
         totalSize: 0,
         totalFiles: 0,
         totalChapters: 0,
+        freeSpace: await _tryGetFreeSpace(),
+        totalSpace: await _tryGetTotalSpace(),
         error: e.toString(),
       );
     }
   }
+
+  Future<int?> _tryGetFreeSpace() async {
+    try {
+  final free = await DiskSpacePlus().getFreeDiskSpace; // MB (instance getter)
+      if (free == null) return null;
+      return (free * 1024 * 1024).round();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<int?> _tryGetTotalSpace() async {
+    try {
+  final total = await DiskSpacePlus().getTotalDiskSpace; // MB (instance getter)
+      if (total == null) return null;
+      return (total * 1024 * 1024).round();
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+/// Simple in-memory settings stub for tests (avoids SharedPreferences IO)
+class _InMemorySettingsRepo extends LocalDownloadsSettingsRepository {
+  String? _path;
+  String? _bookmark;
+  @override
+  Future<String?> getLocalDownloadsPath() async => _path;
+  @override
+  Future<void> setLocalDownloadsPath(String path) async { _path = path; }
+  @override
+  Future<void> clearLocalDownloadsPath() async { _path = null; _bookmark = null; }
+  @override
+  Future<void> setBookmark(String base64) async { _bookmark = base64; }
+  @override
+  Future<String?> getBookmark() async => _bookmark;
 }
 
 /// Result of storage path resolution
@@ -360,19 +302,20 @@ class StoragePathResult {
   final PathType pathType;
   final List<StoragePathAttempt> attempts;
   final bool isTemporary;
-  
+
   const StoragePathResult({
     required this.directory,
     required this.pathType,
     required this.attempts,
     this.isTemporary = false,
   });
-  
-  /// Get human-readable description of the chosen path
+
   String get description {
     switch (pathType) {
       case PathType.custom:
         return 'Custom path';
+      case PathType.applicationSupport:
+        return 'Application support';
       case PathType.documents:
         return 'Application documents';
       case PathType.external:
@@ -383,9 +326,9 @@ class StoragePathResult {
         return 'Temporary storage (may be cleared)';
     }
   }
-  
-  /// Whether this path is considered reliable for long-term storage
+
   bool get isReliable => pathType != PathType.temporary;
+  bool get isCustom => pathType == PathType.custom;
 }
 
 /// Individual path attempt result
@@ -407,11 +350,12 @@ class StoragePathAttempt {
 
 /// Types of storage paths
 enum PathType {
-  custom,     // User-configured custom path
-  documents,  // Application documents directory (iOS-safe)
-  external,   // External storage directory (Android)
-  downloads,  // Downloads directory
-  temporary,  // Temporary directory (last resort)
+  custom,             // User-configured custom path
+  applicationSupport, // Application support directory (preferred persistent)
+  documents,          // Application documents directory
+  external,           // External storage directory (Android)
+  downloads,          // Downloads directory
+  temporary,          // Temporary directory (last resort)
 }
 
 /// Storage usage information
@@ -419,12 +363,16 @@ class StorageUsage {
   final int totalSize;
   final int totalFiles;
   final int totalChapters;
+  final int? freeSpace; // bytes
+  final int? totalSpace; // bytes
   final String? error;
   
   const StorageUsage({
     required this.totalSize,
     required this.totalFiles,
     required this.totalChapters,
+    this.freeSpace,
+    this.totalSpace,
     this.error,
   });
   
@@ -436,6 +384,8 @@ class StorageUsage {
       totalChapters > 0 ? totalSize / totalChapters : 0;
   
   String get formattedAverageChapterSize => _formatBytes(averageChapterSize.round());
+  String get formattedFreeSpace => freeSpace == null ? '—' : _formatBytes(freeSpace!);
+  String get formattedTotalSpace => totalSpace == null ? '—' : _formatBytes(totalSpace!);
   
   static String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';

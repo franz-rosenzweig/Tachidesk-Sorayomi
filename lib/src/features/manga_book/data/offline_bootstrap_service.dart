@@ -7,6 +7,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../domain/offline_catalog/offline_catalog_model.dart';
 import 'offline_catalog_repository.dart';
+import 'local_downloads/local_downloads_repository.dart';
 
 part 'offline_bootstrap_service.g.dart';
 
@@ -21,8 +22,9 @@ enum AppMode {
 class OfflineBootstrapService {
   final OfflineCatalogRepository _catalogRepository;
   final Connectivity _connectivity;
+  final LocalDownloadsRepository _downloadsRepository;
 
-  OfflineBootstrapService(this._catalogRepository, this._connectivity);
+  OfflineBootstrapService(this._catalogRepository, this._connectivity, this._downloadsRepository);
 
   /// Bootstrap the app by loading offline catalog and checking connectivity
   Future<BootstrapResult> bootstrap() async {
@@ -36,6 +38,26 @@ class OfflineBootstrapService {
 
     final catalog = await catalogFuture;
     final isOnline = await connectivityFuture;
+
+    // Auto rebuild if catalog empty but file structure has manifests
+    if (catalog.manga.isEmpty) {
+      try {
+        final manifests = await _downloadsRepository.listDownloads();
+        if (manifests.isNotEmpty) {
+          if (kDebugMode) {
+            print('OfflineBootstrapService: Catalog empty but found ${manifests.length} manifests, rebuilding catalog...');
+          }
+          final rebuilt = await _catalogRepository.rebuildFromManifests();
+          if (kDebugMode) {
+            print('OfflineBootstrapService: Rebuild complete. Manga=${rebuilt.manga.length}');
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('OfflineBootstrapService: Auto rebuild attempt failed: $e');
+        }
+      }
+    }
 
     final hasOfflineContent = catalog.manga.isNotEmpty;
 
@@ -111,7 +133,8 @@ class BootstrapResult {
 OfflineBootstrapService offlineBootstrapService(Ref ref) {
   final catalogRepo = ref.watch(offlineCatalogRepositoryProvider);
   final connectivity = Connectivity();
-  return OfflineBootstrapService(catalogRepo, connectivity);
+  final downloadsRepo = LocalDownloadsRepository(ref);
+  return OfflineBootstrapService(catalogRepo, connectivity, downloadsRepo);
 }
 
 /// Provider for app mode (computed from bootstrap)

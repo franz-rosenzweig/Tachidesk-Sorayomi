@@ -20,7 +20,8 @@ import 'utils/extensions/custom_extensions.dart';
 import 'widgets/offline_bootstrap_wrapper.dart';
 
 class Sorayomi extends ConsumerWidget {
-  const Sorayomi({super.key});
+  final GlobalKey<ScaffoldMessengerState>? scaffoldMessengerKey;
+  const Sorayomi({super.key, this.scaffoldMessengerKey});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -34,6 +35,7 @@ class Sorayomi extends ConsumerWidget {
       client: client,
       child: OfflineBootstrapWrapper(
         child: MaterialApp.router(
+          scaffoldMessengerKey: scaffoldMessengerKey,
           builder: FToastBuilder(),
           onGenerateTitle: (context) => context.l10n.appTitle,
           debugShowCheckedModeBanner: false,

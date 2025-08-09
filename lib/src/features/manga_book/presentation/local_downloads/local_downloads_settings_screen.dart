@@ -10,6 +10,9 @@ import '../../../../widgets/section_title.dart';
 import '../../data/local_downloads/local_downloads_repository.dart';
 import '../../data/local_downloads/local_downloads_settings_repository.dart';
 import '../../data/local_downloads/storage_path_resolver.dart';
+import '../../data/local_downloads/ios_bookmark_service.dart';
+import 'dart:convert';
+import 'dart:io';
 
 class LocalDownloadsSettingsScreen extends ConsumerWidget {
   const LocalDownloadsSettingsScreen({super.key});
@@ -46,7 +49,7 @@ class LocalDownloadsSettingsScreen extends ConsumerWidget {
                               children: [
                                 Text(pathInfo.directory.path),
                                 Text(
-                                  pathInfo.description,
+                                  pathInfo.description + (pathInfo.isTemporary ? ' (temporary)' : ''),
                                   style: TextStyle(
                                     color: pathInfo.isReliable 
                                         ? Colors.green 
@@ -65,11 +68,11 @@ class LocalDownloadsSettingsScreen extends ConsumerWidget {
                                   : Colors.orange,
                             ),
                             trailing: IconButton(
-                              icon: Icon(Icons.folder_open),
+                              icon: Icon(Icons.info_outline),
                               onPressed: () async {
-                                // TODO: Open folder in system file manager
+                                final usage = await downloadsRepository.getStorageUsage();
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Path: ${pathInfo.directory.path}')),
+                                  SnackBar(content: Text('Free: ${usage.formattedFreeSpace} / Total: ${usage.formattedTotalSpace}')),
                                 );
                               },
                             ),
@@ -89,6 +92,41 @@ class LocalDownloadsSettingsScreen extends ConsumerWidget {
                                         style: TextStyle(color: Colors.orange),
                                       ),
                                     ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          if (pathInfo.isTemporary)
+                            Card(
+                              color: Colors.red.withOpacity(0.08),
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: const [
+                                        Icon(Icons.auto_fix_high, color: Colors.red),
+                                        SizedBox(width: 8),
+                                        Text('Migration Recommended', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    const Text('Downloads are in temporary storage and may be deleted. Migrate to a persistent directory.'),
+                                    const SizedBox(height: 12),
+                                    ElevatedButton.icon(
+                                      icon: const Icon(Icons.move_to_inbox),
+                                      label: const Text('Migrate Now'),
+                                      onPressed: () async {
+                                        try {
+                                          await downloadsRepository.performStorageMigration();
+                                          ref.invalidate(localDownloadsPathProvider);
+                                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Migration completed')));
+                                        } catch (e) {
+                                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Migration failed: $e')));
+                                        }
+                                      },
+                                    )
                                   ],
                                 ),
                               ),
@@ -118,11 +156,42 @@ class LocalDownloadsSettingsScreen extends ConsumerWidget {
                     hintText: "Select directory for downloads",
                     onChanged: (path) async {
                       await repository.setLocalDownloadsPath(path);
+                      // Immediately resolve path to detect fallback
+                      final resolved = await downloadsRepository.getStoragePathInfo();
+                      if (!resolved.pathType.name.contains('custom')) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Custom path invalid – reverted to sandbox location')),);
+                      }
                       ref.invalidate(localDownloadsPathProvider);
                       return null; // Not server-side, so no return value needed
                     },
                   ),
                 ),
+                if (Platform.isIOS)
+                  ListTile(
+                    leading: const Icon(Icons.cloud_outlined),
+                    title: const Text('Pick External Folder (Experimental)'),
+                    subtitle: const Text('Uses security-scoped bookmark (iCloud / external)'),
+                    onTap: () async {
+                      final service = IOSBookmarkService();
+                      final res = await service.pickFolderAndCreateBookmark();
+                      if (res.status == IOSBookmarkStatus.created && res.bookmark != null) {
+                        final b64 = base64Encode(res.bookmark!.buffer.asUint8List());
+                        await repository.setBookmark(b64);
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bookmark stored. Resolving...')));
+                        final resolved = await service.resolveBookmark(res.bookmark!);
+                        if (resolved.status == IOSBookmarkStatus.resolved && resolved.path != null) {
+                          await repository.setLocalDownloadsPath(resolved.path!);
+                          ref.invalidate(localDownloadsPathProvider);
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Using folder: ${resolved.path}')));
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Resolve failed: ${resolved.error ?? 'unknown'}')));
+                        }
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Bookmark failed: ${res.error ?? res.status.name}')));
+                      }
+                    },
+                  ),
                 
                 ListTile(
                   title: Text("Reset to Default"),

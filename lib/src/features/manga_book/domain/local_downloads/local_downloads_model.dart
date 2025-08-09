@@ -45,6 +45,8 @@ class LocalChapterManifest {
   final DateTime? lastValidated;
   final String? mangaThumbnailUrl; // optional, may store downloaded later
   final String? sourceUrl; // For repair requests
+  final String? integrityStatus; // ok / partial / corrupt / unknown
+  final int? missingPageCount; // last validation result
 
   LocalChapterManifest({
     this.manifestVersion = 2,
@@ -58,6 +60,8 @@ class LocalChapterManifest {
     this.lastValidated,
     this.mangaThumbnailUrl,
     this.sourceUrl,
+  this.integrityStatus,
+  this.missingPageCount,
   });
 
   // Helper to get page count
@@ -78,6 +82,8 @@ class LocalChapterManifest {
         if (lastValidated != null) 'lastValidated': lastValidated!.toIso8601String(),
         if (mangaThumbnailUrl != null) 'mangaThumbnailUrl': mangaThumbnailUrl,
         if (sourceUrl != null) 'sourceUrl': sourceUrl,
+  if (integrityStatus != null) 'integrityStatus': integrityStatus,
+  if (missingPageCount != null) 'missingPageCount': missingPageCount,
       };
 
   static LocalChapterManifest fromJson(Map<String, dynamic> json) {
@@ -106,6 +112,8 @@ class LocalChapterManifest {
           : null,
       mangaThumbnailUrl: json['mangaThumbnailUrl'] as String?,
       sourceUrl: json['sourceUrl'] as String?,
+  integrityStatus: json['integrityStatus'] as String?,
+  missingPageCount: json['missingPageCount'] as int?,
     );
   }
 
@@ -126,6 +134,8 @@ class LocalChapterManifest {
       lastValidated: DateTime.now(),
       mangaThumbnailUrl: mangaThumbnailUrl,
       sourceUrl: sourceUrl,
+  integrityStatus: integrityStatus,
+  missingPageCount: missingPageCount,
     );
   }
 }

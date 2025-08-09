@@ -7,6 +7,7 @@ import '../../../../widgets/input_popup/domain/settings_prop_type.dart';
 import '../../../../widgets/input_popup/settings_prop_tile.dart';
 import '../../../../widgets/section_title.dart';
 import '../../../manga_book/presentation/local_downloads/local_downloads_settings_screen.dart';
+import '../../../manga_book/data/offline_catalog_actions.dart';
 import '../../controller/server_controller.dart';
 import '../../domain/settings/settings.dart';
 import 'data/downloads_settings_repository.dart';
@@ -32,6 +33,7 @@ class DownloadsSettingsScreen extends ConsumerWidget {
               if (downloadsSettingsDto == null) {
                 return _buildOfflineView(context);
               }
+              final rebuildState = ref.watch(offlineCatalogRebuildControllerProvider);
               return ListView(
                 children: [
                   SectionTitle(title: "Local Downloads"),
@@ -45,6 +47,25 @@ class DownloadsSettingsScreen extends ConsumerWidget {
                           builder: (context) => const LocalDownloadsSettingsScreen(),
                         ),
                       );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.build_circle_outlined),
+                    title: const Text('Rebuild Offline Catalog'),
+                    subtitle: Text(rebuildState.isLoading
+                        ? 'Rebuilding catalog from manifests...'
+                        : 'Scan downloaded chapters and recreate catalog index'),
+                    trailing: rebuildState.isLoading
+                        ? const SizedBox(width:24,height:24,child:CircularProgressIndicator(strokeWidth:2))
+                        : const Icon(Icons.play_arrow),
+                    onTap: rebuildState.isLoading ? null : () async {
+                      final controller = ref.read(offlineCatalogRebuildControllerProvider.notifier);
+                      await controller.rebuild();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Offline catalog rebuild complete')),
+                        );
+                      }
                     },
                   ),
                   SectionTitle(title: context.l10n.general),

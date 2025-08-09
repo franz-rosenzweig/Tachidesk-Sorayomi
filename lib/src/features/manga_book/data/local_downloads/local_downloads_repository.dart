@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -21,6 +22,16 @@ import '../offline_catalog_repository.dart';
 import 'local_downloads_settings_repository.dart';
 import 'storage_migration_manager.dart';
 import 'storage_path_resolver.dart';
+import 'offline_log.dart';
+
+/// Exception representing a write / storage failure during download pipeline
+class DownloadWriteException implements Exception {
+  final String path;
+  final String reason;
+  DownloadWriteException(this.path, this.reason);
+  @override
+  String toString() => 'DownloadWriteException(path=$path, reason=$reason)';
+}
 
 class LocalDownloadsRepository {
   static const downloadsFolderName = 'sorayomi_downloads';
@@ -38,6 +49,27 @@ class LocalDownloadsRepository {
   }
   
   LocalDownloadsRepository(this._ref);
+  
+  /// Test-only factory using a simple lookup function instead of a full Ref
+  factory LocalDownloadsRepository.test(LocalDownloadsSettingsRepository settingsRepo) {
+    final container = _TestRef(settingsRepo);
+    return LocalDownloadsRepository(container);
+  }
+
+  // Simple mutex for catalog writes to avoid rebuild/update races
+  Future _catalogMutex = Future.value();
+  Future<T> _lockCatalog<T>(Future<T> Function() action) {
+    final completer = Completer<T>();
+    _catalogMutex = _catalogMutex.then((_) async {
+      try {
+        final result = await action();
+        completer.complete(result);
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
+    });
+    return completer.future;
+  }
 
   /// Get storage path resolver
   StoragePathResolver get _pathResolver => StoragePathResolver(
@@ -332,6 +364,19 @@ class LocalDownloadsRepository {
     int maxConcurrentPages = 4, // Phase 7.1: Limit concurrent page downloads
   }) async {
     final dir = await _chapterDir(mangaId, chapterId);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    // Fail-fast writable test
+    try {
+      final probe = File(p.join(dir.path, '.write_test'));
+      await probe.writeAsString('probe');
+      await probe.delete();
+    } catch (e) {
+      logOffline('Directory not writable path=${dir.path} error=$e', component: 'download', level: OfflineLogLevel.error);
+      throw DownloadWriteException(dir.path, 'Directory not writable: $e');
+    }
+    logOffline('Begin chapter download: manga=$mangaId chapter=$chapterId pages=${pageUrls.length} dir=${dir.path}', component: 'download');
     final saved = <File>[];
 
     // Phase 7.1: Process pages in batches with limited concurrency
@@ -340,7 +385,7 @@ class LocalDownloadsRepository {
       final batch = pageUrls.sublist(batchStart, batchEnd);
       
       // Download batch concurrently
-      final futures = batch.asMap().entries.map((entry) async {
+  final futures = batch.asMap().entries.map((entry) async {
         final batchIndex = entry.key;
         final globalIndex = batchStart + batchIndex;
         final url = entry.value;
@@ -355,35 +400,26 @@ class LocalDownloadsRepository {
           attempts++;
           
           try {
-            if (kDebugMode) {
-              print('downloadChapterWithProgress PAGE_START: $globalIndex/${pageUrls.length} (attempt $attempts)');
-            }
+            logOffline('PAGE_START index=$globalIndex attempt=$attempts url=$url', component: 'download');
             
             // Phase 7.4: Exponential backoff for retries
             if (attempts > 1) {
               final backoffMs = 500 * (1 << (attempts - 2)); // 500ms, 1s, 2s
               await Future.delayed(Duration(milliseconds: backoffMs));
-              if (kDebugMode) {
-                print('Retrying after ${backoffMs}ms backoff');
-              }
+              logOffline('Retrying page index=$globalIndex backoffMs=$backoffMs attempt=$attempts', component: 'download', level: OfflineLogLevel.info);
             }
             
             await _downloadSinglePage(ref, url, dest, globalIndex);
             
             success = true;
-            
-            if (kDebugMode) {
-              print('downloadChapterWithProgress PAGE_SAVED: $globalIndex/${pageUrls.length}');
-            }
+            logOffline('PAGE_SAVED index=$globalIndex path=${dest.path}', component: 'download');
             
             return dest;
             
           } catch (e) {
             lastError = e is Exception ? e : Exception(e.toString());
             
-            if (kDebugMode) {
-              print('downloadChapterWithProgress PAGE_FAILED: $globalIndex/$pageUrls.length (attempt $attempts): $e');
-            }
+            logOffline('PAGE_FAILED index=$globalIndex attempt=$attempts reason=${e.toString()}', component: 'download', level: OfflineLogLevel.warn);
             
             // Clean up failed attempt
             if (await dest.exists()) {
@@ -419,7 +455,7 @@ class LocalDownloadsRepository {
       onProgress?.call(saved.length, pageUrls.length);
     }
     
-    return saved;
+  return saved;
   }
 
   /// Download a single page with robust error handling
@@ -561,9 +597,18 @@ class LocalDownloadsRepository {
     String? mangaThumbnailUrl,
     void Function(int pagesDownloaded, int totalPages)? onProgress,
   }) async {
+  final totalStart = DateTime.now();
     if (kDebugMode) {
       print('downloadChapterWithProgress START: manga $mangaId, chapter $chapterId');
     }
+  final baseDir = await _baseDir();
+  // Free space warning (approx) using statvfs if available (skip on web)
+  try {
+    final stat = await FileStat.stat(baseDir.path);
+    // FileStat does not expose free space; placeholder: rely on path resolver usage which now carries freeSpace via StorageUsage when UI fetches.
+    // Future improvement: platform channel for precise free space check.
+  } catch (_) {}
+  logOffline('Download request received manga=$mangaId chapter=$chapterId root=${baseDir.path}', component: 'download', level: OfflineLogLevel.info);
     
     final repo = ref.read(mangaBookRepositoryProvider);
     final pages = await repo.getChapterPages(chapterId: chapterId);
@@ -579,11 +624,30 @@ class LocalDownloadsRepository {
     // Report initial progress
     onProgress?.call(0, pageUrls.length);
 
-    final files = await _downloadPagesToChapterWithProgress(ref,
-        mangaId: mangaId, 
-        chapterId: chapterId, 
-        pageUrls: pageUrls,
-        onProgress: onProgress);
+  final pagesStart = DateTime.now();
+  List<File> files = [];
+    try {
+      files = await _downloadPagesToChapterWithProgress(ref,
+          mangaId: mangaId,
+          chapterId: chapterId,
+          pageUrls: pageUrls,
+          onProgress: onProgress);
+    } catch (e) {
+      logOffline('Chapter download failed, cleaning partial data manga=$mangaId chapter=$chapterId error=$e', component: 'download', level: OfflineLogLevel.error, error: e);
+      // Cleanup partial directory
+      try {
+        final dir = await _chapterDir(mangaId, chapterId);
+        if (await dir.exists()) {
+          await dir.delete(recursive: true);
+          logOffline('Partial directory removed ${dir.path}', component: 'download', level: OfflineLogLevel.warn);
+        }
+      } catch (cleanupError) {
+        logOffline('Failed cleanup after error: $cleanupError', component: 'download', level: OfflineLogLevel.error);
+      }
+      rethrow;
+    }
+  final pagesElapsedMs = DateTime.now().difference(pagesStart).inMilliseconds;
+  logOffline('Pages downloaded elapsedMs=$pagesElapsedMs avgPerPageMs=${(pagesElapsedMs / files.length).toStringAsFixed(1)}', component: 'metrics', level: OfflineLogLevel.info);
 
     if (kDebugMode) {
       print('downloadChapterWithProgress: Successfully downloaded ${files.length} files');
@@ -634,8 +698,12 @@ class LocalDownloadsRepository {
       sourceUrl: null, // Could be populated with server URL for repair
     );
 
-    final mf = await _manifestFile(mangaId, chapterId);
-    await mf.writeAsString(jsonEncode(manifest.toJson()));
+  final manifestStart = DateTime.now();
+  final mf = await _manifestFile(mangaId, chapterId);
+  await mf.writeAsString(jsonEncode(manifest.toJson()));
+  logOffline('Manifest written path=${mf.path} pages=${files.length}', component: 'manifest', level: OfflineLogLevel.info);
+  final manifestElapsedMs = DateTime.now().difference(manifestStart).inMilliseconds;
+  logOffline('Manifest write elapsedMs=$manifestElapsedMs sizeBytes=${await mf.length()}', component: 'metrics', level: OfflineLogLevel.info);
     
     if (kDebugMode) {
       print('downloadChapterWithProgress MANIFEST_WRITTEN: ${mf.path}');
@@ -643,10 +711,16 @@ class LocalDownloadsRepository {
     }
 
     // NEW: Update offline catalog after successful download
-    await _updateOfflineCatalogAfterDownload(manifest, mangaTitle, mangaThumbnailUrl);
+  final catalogStart = DateTime.now();
+  await _lockCatalog(() => _updateOfflineCatalogAfterDownload(manifest, mangaTitle, mangaThumbnailUrl));
+  logOffline('Offline catalog updated for manga=$mangaId chapter=$chapterId', component: 'catalog', level: OfflineLogLevel.info);
+  final catalogElapsedMs = DateTime.now().difference(catalogStart).inMilliseconds;
+  final totalElapsedMs = DateTime.now().difference(totalStart).inMilliseconds;
+  logOffline('Timing pagesMs=$pagesElapsedMs manifestMs=$manifestElapsedMs catalogMs=$catalogElapsedMs totalMs=$totalElapsedMs', component: 'metrics', level: OfflineLogLevel.info);
 
     // Report final progress
-    onProgress?.call(pageUrls.length, pageUrls.length);
+  onProgress?.call(pageUrls.length, pageUrls.length);
+  logOffline('Download complete manga=$mangaId chapter=$chapterId', component: 'download', level: OfflineLogLevel.info);
   }
 
   Future<void> deleteLocalChapter(int mangaId, int chapterId) async {
@@ -887,6 +961,21 @@ class LocalDownloadsRepository {
     
     return 0.0;
   }
+}
+
+/// Minimal test Ref stub implementing only read for settings repo
+class _TestRef implements Ref {
+  final LocalDownloadsSettingsRepository _settingsRepo;
+  _TestRef(this._settingsRepo);
+  @override
+  T read<T>(ProviderListenable<T> provider) {
+    if (provider == localDownloadsSettingsRepositoryProvider) {
+      return _settingsRepo as T;
+    }
+    throw UnimplementedError('TestRef only supports settings repository');
+  }
+  // Unimplemented members throw; tests should not rely on them.
+  @override noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 final localDownloadsRepositoryProvider = Provider<LocalDownloadsRepository>(

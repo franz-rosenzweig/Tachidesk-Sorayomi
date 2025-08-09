@@ -47,6 +47,12 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# iOS/Flutter ad-hoc distribution artifacts (ensure not committed)
+*.ipa
+Payload/
+build/ios/iphoneos/Payload/
+build/ios/iphoneos/*.ipa
+
 
 *.g.dart
 *.freezed.dart

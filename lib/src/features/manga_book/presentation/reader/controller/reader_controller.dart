@@ -140,6 +140,7 @@ Future<ChapterPagesResult> chapterPagesDecision(
       } else {
         if (kDebugMode) {
           print('ChapterPagesDecision: OFFLINE - No local manifest available');
+            print('ChapterPagesDecision: CONFIRM no network request will be made in offline mode.');
         }
         throw OfflineNotAvailableException('Chapter $chapterId not downloaded and device is offline');
       }

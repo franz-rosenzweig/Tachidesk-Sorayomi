@@ -13,7 +13,8 @@ import '../../../../utils/misc/toast/toast.dart';
 import '../../../../widgets/emoticons.dart';
 import '../../data/downloads/downloads_repository.dart';
 import '../../domain/downloads/downloads_model.dart';
-import '../local_downloads/local_downloads_screen.dart';
+// Using enhanced local downloads screen implementation with header & validation
+import '../local_downloads/local_downloads_screen_new.dart';
 import 'controller/downloads_controller.dart';
 import 'widgets/download_progress_list_tile.dart';
 import 'widgets/downloads_fab.dart';
